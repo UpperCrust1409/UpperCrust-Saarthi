@@ -1,0 +1,113 @@
+/* ── Design tokens (ported from original) ── */
+:root {
+  --gold: #8a6814; --gold2: #b8922a; --gold3: #6a5010;
+  --glt: #fdf4db; --gbdr: rgba(138,104,20,.22); --gbg: #fdf8ee;
+  --ink: #1a1610; --ink2: #3a3020; --ink3: #6a6040; --ink4: #b0a880;
+  --sur: #ffffff; --sur2: #faf8f2; --sur3: #f5f0e8;
+  --bdr: #e0d8c0; --bdr2: #d0c8a8;
+  --bg: #f4efe4; --bg4: #f0ebe0;
+  --green: #1a7a42; --grn2: #edf7ec; --grnbdr: rgba(26,122,66,.22);
+  --red: #c0382a; --red2: #fdf0ee; --redbdr: rgba(192,56,42,.22);
+  --amber: #b06010; --amb2: #fdf5e8; --ambbdr: rgba(176,96,16,.22);
+  --r: 7px; --radius: 8px;
+  --sh: 0 1px 4px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.04);
+  --sh2: 0 2px 12px rgba(0,0,0,.09);
+  --sb-w: 224px; --hdr-h: 52px; --mob-nav-h: 56px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Colours ── */
+.pos  { color: var(--green) !important; }
+.neg  { color: var(--red)   !important; }
+.neu  { color: var(--ink3)  !important; }
+.gld  { color: var(--gold3) !important; }
+
+/* ── KPI cards ── */
+.kc {
+  background: var(--sur); border: 1.5px solid var(--bdr);
+  border-radius: var(--r); padding: 13px 15px; box-shadow: var(--sh);
+}
+.kc.gold { border-top: 3px solid var(--gold2); }
+.kc.grn  { border-top: 3px solid var(--green); background: var(--grn2); }
+.kc.red  { border-top: 3px solid var(--red);   background: var(--red2); }
+.kc.amb  { border-top: 3px solid var(--amber); background: var(--amb2); }
+.kc-lbl  { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--ink4); margin-bottom: 5px; }
+.kc-val  { font-family: 'Playfair Display', serif; font-size: 17px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.kc-sub  { font-size: 9.5px; margin-top: 3px; }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--r); border: 1.5px solid transparent;
+  font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s;
+  font-family: 'Inter', system-ui, sans-serif; white-space: nowrap;
+}
+.btn-gold  { background: var(--gold);  color: #fff; border-color: var(--gold); }
+.btn-gold:hover { background: var(--gold2); border-color: var(--gold2); }
+.btn-ghost { background: transparent; color: var(--ink2); border-color: var(--bdr); }
+.btn-ghost:hover { background: var(--sur2); }
+.btn-dark  { background: #2a2415; color: #f0d060; border-color: #3a3020; }
+.btn-sm    { padding: 5px 10px; font-size: 11px; }
+.btn-xs    { padding: 3px 8px;  font-size: 10.5px; }
+
+/* ── Badges ── */
+.bdg { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 8.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; }
+.bdg-gold { background: var(--glt);  color: var(--gold3); border: 1px solid var(--gbdr); }
+.bdg-grn  { background: var(--grn2); color: var(--green); border: 1px solid var(--grnbdr); }
+.bdg-red  { background: var(--red2); color: var(--red);   border: 1px solid var(--redbdr); }
+.bdg-amb  { background: var(--amb2); color: var(--amber); border: 1px solid var(--ambbdr); }
+.bdg-gray { background: var(--sur3); color: var(--ink3);  border: 1px solid var(--bdr); }
+
+/* ── Tables ── */
+.tbl { background: var(--sur); border: 1.5px solid var(--bdr); border-radius: var(--r); overflow: hidden; margin-bottom: 14px; box-shadow: var(--sh); }
+.tbl-hd { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1.5px solid var(--bdr); background: var(--sur2); gap: 8px; flex-wrap: wrap; }
+.tbl-ht { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--ink2); }
+table   { width: 100%; border-collapse: collapse; }
+thead th { background: var(--sur2); font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--ink4); padding: 7px 11px; border-bottom: 1.5px solid var(--bdr); text-align: left; white-space: nowrap; }
+tbody td { padding: 8px 11px; border-bottom: 1px solid var(--bdr); font-size: 12px; vertical-align: middle; color: var(--ink); }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--sur2); }
+.tr-c { cursor: pointer; }
+.tr-c:hover td { background: var(--glt) !important; }
+
+/* ── Panels ── */
+.panel { background: var(--sur); border: 1.5px solid var(--bdr); border-radius: var(--r); padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--sh); }
+
+/* ── Progress bars ── */
+.pb  { display: flex; align-items: center; gap: 6px; }
+.pt  { flex: 1; height: 5px; background: var(--sur3); border-radius: 3px; overflow: hidden; }
+.pf  { height: 100%; border-radius: 3px; background: var(--gold); }
+.pf-g { background: var(--green); }
+.pf-r { background: var(--red); }
+.pf-a { background: var(--amber); }
+
+/* ── Spinner ── */
+.spin { width: 24px; height: 24px; border: 2.5px solid var(--bdr); border-top-color: var(--gold); border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Upload zone ── */
+.upz {
+  position: relative; border: 2.5px dashed var(--bdr2); border-radius: 12px;
+  padding: 40px 24px; text-align: center; cursor: pointer; background: var(--sur);
+  transition: border-color .15s, background .15s;
+}
+.upz:hover, .upz.over { border-color: var(--gold2); background: var(--glt); }
+
+/* ── Risk alerts ── */
+.ra { display: flex; gap: 12px; background: var(--sur2); border: 1.5px solid var(--bdr); border-radius: var(--r); padding: 12px 14px; }
+.ra.breach  { background: var(--red2); border-color: var(--redbdr); }
+.ra.warning { background: var(--amb2); border-color: var(--ambbdr); }
+.rsug { background: var(--glt); border: 1px solid var(--gbdr); border-radius: 5px; padding: 5px 9px; font-size: 11px; color: var(--gold3); }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-thumb { background: var(--bdr); border-radius: 3px; }
