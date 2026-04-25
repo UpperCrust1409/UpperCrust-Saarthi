@@ -39,6 +39,9 @@ const NAV = [
       { id: 'rebal',      label: 'Rebalancing', icon: '⟳', href: '/rebalancing' },
       { id: 'capital',    label: 'Capital Deploy', icon: '◈', href: '/capital' },
       { id: 'scenarios',  label: 'Scenarios', icon: '🎯', href: '/scenarios' },
+      { id: 'trade',      label: 'Trade Engine', icon: '⚡', href: '/trade' },
+      { id: 'bulk',       label: 'Bulk Deploy', icon: '⊞', href: '/bulk' },
+      { id: 'deploy',     label: 'Deploy Planner', icon: '◎', href: '/deploy' },
       { id: 'onboard',    label: 'New Client', icon: '➕', href: '/onboard' },
       { id: 'comms',      label: 'Communications', icon: '💬', href: '/communications' },
       { id: 'tags',       label: 'Tag Manager', icon: '🏷️', href: '/tags' }
