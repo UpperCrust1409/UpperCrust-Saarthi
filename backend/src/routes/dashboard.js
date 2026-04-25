@@ -28,7 +28,7 @@ router.get('/', requireAuth, async (req, res) => {
     // 3. Sector allocation
     const { rows: sectors } = await db.query(`
       SELECT
-        COALESCE(st.sector, sm.sector, 'Untagged') AS sector,
+        COALESCE(st.sector, sm.s, 'Untagged') AS sector,
         SUM(h.market_value) AS value
       FROM holdings h
       JOIN clients c ON c.id = h.client_id
