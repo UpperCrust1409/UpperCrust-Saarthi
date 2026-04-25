@@ -14,6 +14,9 @@ const tagsRoutes     = require('./routes/tags');
 
 const app = express();
 
+// ── Trust proxy (required for Railway / reverse proxies) ──
+app.set('trust proxy', 1);
+
 // ── Security middleware ──
 app.use(helmet());
 app.use(cors({
