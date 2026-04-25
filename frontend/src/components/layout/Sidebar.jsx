@@ -14,26 +14,34 @@ const NAV = [
   {
     group: 'Portfolio',
     items: [
-      { id: 'clients', label: 'Clients', icon: '◈', href: '/clients' },
-      { id: 'stocks',  label: 'Stocks',  icon: '◇', href: '/stocks' },
-      { id: 'sectors', label: 'Sectors', icon: '⬡', href: '/sectors' }
+      { id: 'clients',     label: 'Clients', icon: '◈', href: '/clients' },
+      { id: 'stocks',      label: 'Stocks',  icon: '◇', href: '/stocks' },
+      { id: 'sectors',     label: 'Sectors', icon: '⬡', href: '/sectors' },
+      { id: 'conviction',  label: 'Conviction Tracker', icon: '⭐', href: '/conviction' }
     ]
   },
   {
     group: 'Intelligence',
     items: [
-      { id: 'risk',        label: 'Risk / Alerts',  icon: '⚡', href: '/risk' },
+      { id: 'family',      label: 'Family View', icon: '👨‍👩‍👧', href: '/family' },
+      { id: 'health',      label: 'Portfolio Health', icon: '🩺', href: '/health' },
+      { id: 'filters',     label: 'Risk Filters', icon: '⚙️', href: '/filters' },
       { id: 'attribution', label: 'P&L Attribution', icon: '📊', href: '/attribution' },
-      { id: 'health',      label: 'Portfolio Health', icon: '🩺', href: '/health' }
+      { id: 'bullion',     label: 'Bullion Tracker', icon: '💛', href: '/bullion' },
+      { id: 'benchmark',   label: 'Benchmark', icon: '📈', href: '/benchmark' },
+      { id: 'alert',       label: 'Morning Alert', icon: '🔔', href: '/alert' }
     ]
   },
   {
     group: 'Execute',
     items: [
-      { id: 'sim',    label: 'Pre-Trade Sim',   icon: '◎', href: '/simulator' },
-      { id: 'rebal',  label: 'Rebalancing',     icon: '⟳', href: '/rebalancing' },
-      { id: 'capital',label: 'Capital Deploy',  icon: '◈', href: '/capital' },
-      { id: 'onboard',label: 'New Client',      icon: '➕', href: '/onboard' }
+      { id: 'sim',        label: 'Pre-Trade Sim', icon: '◎', href: '/simulator' },
+      { id: 'rebal',      label: 'Rebalancing', icon: '⟳', href: '/rebalancing' },
+      { id: 'capital',    label: 'Capital Deploy', icon: '◈', href: '/capital' },
+      { id: 'scenarios',  label: 'Scenarios', icon: '🎯', href: '/scenarios' },
+      { id: 'onboard',    label: 'New Client', icon: '➕', href: '/onboard' },
+      { id: 'comms',      label: 'Communications', icon: '💬', href: '/communications' },
+      { id: 'tags',       label: 'Tag Manager', icon: '🏷️', href: '/tags' }
     ]
   }
 ];
@@ -101,6 +109,11 @@ export default function Sidebar({ riskSummary }) {
                   {isRisk && riskSummary?.breach > 0 && (
                     <span style={{ marginLeft: 'auto', fontSize: 8.5, fontWeight: 700, background: '#c0382a', color: '#fff', padding: '1px 5px', borderRadius: 10 }}>
                       {riskSummary.breach}
+                    </span>
+                  )}
+                  {item.id === 'tags' && riskSummary?.untagged > 0 && (
+                    <span style={{ marginLeft: 'auto', fontSize: 8.5, fontWeight: 700, background: '#d4a82e', color: '#000', padding: '1px 5px', borderRadius: 10 }}>
+                      {riskSummary.untagged}
                     </span>
                   )}
                 </div>
