@@ -1,58 +1,86 @@
-const router = require('express').Router();
-const db     = require('../config/db');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const express = require('express');
+const router = express.Router();
+const { supabase } = require('../db/supabase');
 
-// ── GET /api/tags ──
-router.get('/', requireAuth, async (req, res) => {
-  const { rows } = await db.query('SELECT * FROM stock_tags ORDER BY symbol');
-  res.json(rows);
-});
-
-// ── PUT /api/tags/:symbol  (admin only) ──
-router.put('/:symbol', requireAuth, requireAdmin, async (req, res) => {
-  const { sector, mcap, hidden } = req.body;
-  const sym = req.params.symbol;
+// GET /api/tags — all tags
+router.get('/', async (req, res) => {
   try {
-    const { rows } = await db.query(
-      `INSERT INTO stock_tags (symbol, sector, mcap, hidden, updated_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (symbol) DO UPDATE
-         SET sector = EXCLUDED.sector, mcap = EXCLUDED.mcap,
-             hidden = EXCLUDED.hidden, updated_at = NOW()
-       RETURNING *`,
-      [sym, sector || null, mcap || null, !!hidden]
-    );
-    res.json(rows[0]);
+    const { data, error } = await supabase
+      .from('tags')
+      .select('*')
+      .order('symbol');
+    if (error) throw error;
+    res.json(data || []);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Tags GET error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── DELETE /api/tags/:symbol  (admin only) ──
-router.delete('/:symbol', requireAuth, requireAdmin, async (req, res) => {
-  await db.query('DELETE FROM stock_tags WHERE symbol = $1', [req.params.symbol]);
-  res.json({ message: 'Tag removed' });
+// POST /api/tags — upsert a single tag
+router.post('/', async (req, res) => {
+  try {
+    const { symbol, sector, mcap, asset_type, max_alloc, hidden } = req.body;
+    if (!symbol) return res.status(400).json({ error: 'symbol required' });
+    const { data, error } = await supabase
+      .from('tags')
+      .upsert({
+        symbol: symbol.trim().toUpperCase(),
+        sector: sector || null,
+        mcap: mcap || null,
+        asset_type: asset_type || null,
+        max_alloc: max_alloc !== undefined ? max_alloc : null,
+        hidden: hidden !== undefined ? hidden : false,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'symbol' })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, tag: data });
+  } catch (err) {
+    console.error('Tags POST error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// ── GET /api/tags/sector-limits ──
-router.get('/sector-limits', requireAuth, async (req, res) => {
-  const { rows } = await db.query('SELECT * FROM sector_limits');
-  res.json(rows);
+// DELETE /api/tags/:symbol — reset a tag
+router.delete('/:symbol', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('tags')
+      .delete()
+      .eq('symbol', req.params.symbol.trim().toUpperCase());
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Tags DELETE error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// ── PUT /api/tags/sector-limits/:sector  (admin only) ──
-router.put('/sector-limits/:sector', requireAuth, requireAdmin, async (req, res) => {
-  const { pct } = req.body;
-  if (typeof pct !== 'number' || pct <= 0 || pct > 1)
-    return res.status(400).json({ error: 'pct must be a number 0–1' });
-  const { rows } = await db.query(
-    `INSERT INTO sector_limits (sector, pct, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (sector) DO UPDATE SET pct = EXCLUDED.pct, updated_at = NOW()
-     RETURNING *`,
-    [req.params.sector, pct]
-  );
-  res.json(rows[0]);
+// POST /api/tags/bulk — save all tags at once
+router.post('/bulk', async (req, res) => {
+  try {
+    const { tags } = req.body;
+    if (!Array.isArray(tags) || !tags.length) return res.status(400).json({ error: 'tags array required' });
+    const records = tags.map(t => ({
+      symbol: t.symbol.trim().toUpperCase(),
+      sector: t.sector || null,
+      mcap: t.mcap || null,
+      asset_type: t.asset_type || null,
+      max_alloc: t.max_alloc !== undefined ? t.max_alloc : null,
+      hidden: t.hidden !== undefined ? t.hidden : false,
+      updated_at: new Date().toISOString()
+    }));
+    const { error } = await supabase
+      .from('tags')
+      .upsert(records, { onConflict: 'symbol' });
+    if (error) throw error;
+    res.json({ success: true, count: records.length });
+  } catch (err) {
+    console.error('Tags BULK error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
