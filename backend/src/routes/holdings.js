@@ -9,7 +9,7 @@ router.get('/', async (req, res) => {
     const { data, error } = await supabase
       .from('holdings')
       .select('*')
-      .order('client_id, market_value', { ascending: [true, false] });
+      .order('client_id', { ascending: true })
 
     if (error) throw error;
     res.json(data || []);
