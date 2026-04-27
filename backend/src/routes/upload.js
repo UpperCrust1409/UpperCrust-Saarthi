@@ -1,148 +1,244 @@
-const router   = require('express').Router();
-const db       = require('../config/db');
-const upload   = require('../middleware/upload');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { parsePortfolioExcel } = require('../services/parser');
+const express = require('express');
+const router = express.Router();
+const multer = require('multer');
+const XLSX = require('xlsx');
+const { supabase } = require('../db/supabase');
 
-// ── POST /api/upload  (admin only) ──
-router.post('/', requireAuth, requireAdmin, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-  const logId = await createLog(req.file.originalname, req.user.id);
-  res.json({ message: 'Processing started', uploadId: logId });
-
-  // Process async — don't block response
-  processUpload(req.file.buffer, logId).catch(err => {
-    console.error('[UPLOAD PROCESS ERROR]', err);
-    markLogError(logId, err.message);
-  });
-});
-
-// ── GET /api/upload/logs  (admin) ──
-router.get('/logs', requireAuth, requireAdmin, async (req, res) => {
-  const { rows } = await db.query(
-    `SELECT ul.*, u.name as uploader_name
-     FROM upload_logs ul
-     LEFT JOIN users u ON ul.uploaded_by = u.id
-     ORDER BY ul.uploaded_at DESC LIMIT 30`
-  );
-  res.json(rows);
-});
-
-// ── GET /api/upload/status/:id ──
-router.get('/status/:id', requireAuth, async (req, res) => {
-  const { rows } = await db.query('SELECT * FROM upload_logs WHERE id = $1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Upload not found' });
-  res.json(rows[0]);
-});
-
-// ── Helpers ──
-async function createLog(filename, userId) {
-  const { rows } = await db.query(
-    `INSERT INTO upload_logs (filename, uploaded_by, status) VALUES ($1,$2,'processing') RETURNING id`,
-    [filename, userId]
-  );
-  return rows[0].id;
+// ══════════════════════════════════════
+//  EXCEL PARSER — mirrors your HTML tool exactly
+// ══════════════════════════════════════
+function nv(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n;
 }
 
-async function markLogError(logId, msg) {
-  await db.query(
-    `UPDATE upload_logs SET status='error', error_message=$1 WHERE id=$2`,
-    [msg, logId]
-  );
+function tryParseDate(str) {
+  if (!str) return null;
+  const MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+  const DATE_PAT = /Date\s+of\s+Investment\s*[:\-]\s*(\d{1,2})[\/\-\s](\w{3,9})[\/\-\s](\d{4})/i;
+  const DATE_PAT2 = /(\d{2})[\/\-](\w{3})[\/\-](\d{4})/;
+  let m = String(str).match(DATE_PAT);
+  if (!m) m = String(str).match(DATE_PAT2);
+  if (!m) return null;
+  const d = parseInt(m[1]), monStr = m[2].toLowerCase().slice(0,3), y = parseInt(m[3]);
+  const mon = MONTHS[monStr];
+  if (isNaN(d) || mon === undefined || isNaN(y) || y < 2000 || y > 2100) return null;
+  return new Date(y, mon, d);
 }
 
-async function processUpload(buffer, logId) {
-  const dbClient = await db.getClient();
-  try {
-    await dbClient.query('BEGIN');
-
-    // 1. Parse Excel
-    const { clients, stocks } = parsePortfolioExcel(buffer);
-    const clientList = Object.values(clients);
-    const stockList  = Object.values(stocks);
-
-    if (!clientList.length) throw new Error('No valid client sheets found in the file');
-
-    // 2. Insert clients
-    const clientIdMap = {};
-    for (const c of clientList) {
-      const { rows } = await dbClient.query(
-        `INSERT INTO clients
-           (name, sheet_name, total_invested, total_invested_holdings,
-            total_current, total_current_holdings,
-            total_pnl, total_pnl_pct, realized_gain, cash,
-            has_true_cost, investment_date, upload_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-         RETURNING id`,
-        [
-          c.name, c.sn,
-          c.totalInvested, c.totalInvestedHoldings,
-          c.totalCurrent,  c.totalCurrentHoldings,
-          c.totalPnL, c.totalPnLPct, c.realizedGain,
-          c.cash, c.hasTrueCost,
-          c.investmentDate || null,
-          logId
-        ]
-      );
-      clientIdMap[c.name] = rows[0].id;
-    }
-
-    // 3. Insert holdings
-    for (const c of clientList) {
-      const clientId = clientIdMap[c.name];
-      for (const h of (c.holdings || [])) {
-        await dbClient.query(
-          `INSERT INTO holdings
-             (client_id, symbol, name, qty, unit_cost, total_cost,
-              market_price, market_value, pnl, pnl_pct, holding_pct, asset_class, upload_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-          [
-            clientId, h.symbol, h.name, h.qty, h.unitCost, h.totalCost,
-            h.marketPrice, h.marketValue, h.pnl, h.pnlPct, h.holdingPct,
-            h.assetClass, logId
-          ]
-        );
-      }
-    }
-
-    // 4. Insert stocks + stock_clients
-    for (const s of stockList) {
-      const tv = s.clients.reduce((a, c) => a + c.value, 0);
-      const tc = s.clients.reduce((a, c) => a + c.cost,  0);
-      const { rows } = await dbClient.query(
-        `INSERT INTO stocks (symbol, name, total_value, total_cost, client_count, upload_id)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [s.symbol, s.name, tv, tc, s.clients.length, logId]
-      );
-      const stockId = rows[0].id;
-      for (const sc of s.clients) {
-        await dbClient.query(
-          `INSERT INTO stock_clients
-             (stock_id, client_id, client_name, qty, cost, value, pnl, pnl_pct, allocation_pct, upload_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [
-            stockId, clientIdMap[sc.clientName], sc.clientName,
-            sc.qty, sc.cost, sc.value, sc.pnl, sc.pnlPct, sc.allocationPct, logId
-          ]
-        );
-      }
-    }
-
-    // 5. Mark log as success
-    await dbClient.query(
-      `UPDATE upload_logs SET status='success', client_count=$1, stock_count=$2 WHERE id=$3`,
-      [clientList.length, stockList.length, logId]
-    );
-
-    await dbClient.query('COMMIT');
-    console.log(`[UPLOAD] ${logId} done — ${clientList.length} clients, ${stockList.length} stocks`);
-  } catch (err) {
-    await dbClient.query('ROLLBACK');
-    throw err;
-  } finally {
-    dbClient.release();
+function parseSheet(sheetName, rows) {
+  // Find header row containing "Quantity" AND "Market Value"
+  let hr = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const joined = (rows[i] || []).join(' ');
+    if (joined.includes('Quantity') && joined.includes('Market Value')) { hr = i; break; }
   }
+  if (hr === -1) return null;
+
+  // Extract investment date from top rows
+  let investmentDate = null;
+  for (let i = 0; i < Math.min(hr + 1, 20); i++) {
+    const row = rows[i] || [];
+    for (let j = 0; j < row.length; j++) {
+      const v = row[j]; if (!v) continue;
+      const vs = String(v);
+      if (vs.toLowerCase().includes('investment') || vs.toLowerCase().includes('date of')) {
+        const dt = tryParseDate(vs);
+        if (dt) { investmentDate = dt; break; }
+      }
+    }
+    if (investmentDate) break;
+    const joined = row.join(' ');
+    if (joined.toLowerCase().includes('investment')) {
+      const dt = tryParseDate(joined);
+      if (dt) { investmentDate = dt; break; }
+    }
+  }
+
+  // Map column indices
+  const hdr = rows[hr];
+  let cAC=-1, cD=-1, cQ=-1, cUC=-1, cTC=-1, cMP=-1, cMV=-1, cUG=-1, cHP=-1, cGP=-1;
+  hdr.forEach((v, i) => {
+    if (!v) return;
+    const s = String(v).trim();
+    if (s === 'Asset Class')      cAC = i;
+    if (s === 'Item Description') cD  = i;
+    if (s === 'Quantity')         cQ  = i;
+    if (s === 'Unit Cost')        cUC = i;
+    if (s === 'Total Cost')       cTC = i;
+    if (s === 'Market Price')     cMP = i;
+    if (s === 'Market Value')     cMV = i;
+    if (s === 'Unrealized Gain')  cUG = i;
+    if (s === 'Holding %')        cHP = i;
+    if (s === '% Gain To Cost')   cGP = i;
+  });
+
+  const holdings = [];
+  let curClass = '', cash = 0;
+  const name = sheetName.replace(/\(.*\)/, '').trim();
+
+  for (let i = hr + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.every(v => v === null || v === '')) continue;
+    const ac = cAC >= 0 ? row[cAC] : null;
+    if (!ac || typeof ac !== 'string' || !ac.trim()) continue;
+
+    const a = ac.trim();
+    if (['Equity','Exchange Traded Fund','Hybrid Fund','Bank Balance','Accruals'].some(s => a.includes(s))) {
+      curClass = a; continue;
+    }
+    if (a.includes('Total') || a.includes('Grand')) continue;
+    if (a.includes('BALANCE WITH BANKS')) {
+      cash = nv(row[cMV]) || nv(row[cTC]) || 0;
+      continue;
+    }
+
+    const desc = cD >= 0 ? row[cD] : null;
+    const n = desc ? String(desc).trim() : a;
+    const qty = nv(row[cQ]);
+    const mv  = nv(row[cMV]);
+
+    if (qty !== null && mv !== null && !curClass.includes('Accruals') && !curClass.includes('Bank')) {
+      holdings.push({
+        symbol:     a,
+        name:       n,
+        qty:        qty,
+        unitCost:   nv(row[cUC]) || 0,
+        totalCost:  nv(row[cTC]) || 0,
+        marketPrice:nv(row[cMP]) || 0,
+        marketValue:mv,
+        pnl:        nv(row[cUG]) || 0,
+        pnlPct:     nv(row[cGP]) || 0,
+        holdingPct: nv(row[cHP]) || 0,
+        assetClass: curClass
+      });
+    }
+  }
+
+  // Extract true cost from summary section
+  let trueCost = null, trueCurrentVal = null;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]; if (!row) continue;
+    for (let j = 0; j < row.length - 1; j++) {
+      const cell = String(row[j] || '').trim().toLowerCase();
+      const val  = nv(row[j+1]) ?? nv(row[j+2]) ?? nv(row[j+3]);
+      if (cell.includes('total cost of investment') && val !== null)   trueCost = val;
+      if (cell.includes('current value of investment') && val !== null) trueCurrentVal = val;
+    }
+  }
+
+  const effectiveCost    = trueCost       !== null ? trueCost       : holdings.reduce((s,h) => s+h.totalCost,   0);
+  const effectiveCurrent = trueCurrentVal !== null ? trueCurrentVal : holdings.reduce((s,h) => s+h.marketValue, 0);
+  const pl = effectiveCurrent - effectiveCost;
+
+  return {
+    name,
+    holdings,
+    cash,
+    totalInvested:  effectiveCost,
+    totalCurrent:   effectiveCurrent,
+    totalPnL:       pl,
+    totalPnLPct:    effectiveCost > 0 ? pl / effectiveCost : 0,
+    investmentDate,
+    hasTrueCost:    trueCost !== null
+  };
 }
+
+function parsePortfolioExcel(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const clients = [];
+  wb.SheetNames.forEach(sn => {
+    const ws   = wb.Sheets[sn];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+    const c    = parseSheet(sn, rows);
+    if (c) clients.push(c);
+  });
+  return clients;
+}
+
+// ══════════════════════════════════════
+//  POST /upload
+// ══════════════════════════════════════
+router.post('/', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    // Parse Excel
+    const clients = parsePortfolioExcel(req.file.buffer);
+    if (!clients.length) return res.status(400).json({ error: 'No valid client sheets found in this file' });
+
+    // 1. Create upload log
+    const { data: uploadRecord, error: upErr } = await supabase
+      .from('uploads')
+      .insert({ filename: req.file.originalname })
+      .select()
+      .single();
+    if (upErr) throw upErr;
+
+    // 2. Wipe old data (clean re-upload — always fresh)
+    const { data: oldClients } = await supabase.from('clients').select('id');
+    if (oldClients && oldClients.length > 0) {
+      const oldIds = oldClients.map(c => c.id);
+      await supabase.from('holdings').delete().in('client_id', oldIds);
+      await supabase.from('clients').delete().in('id', oldIds);
+    }
+
+    // 3. Insert fresh data
+    let totalHoldings = 0;
+    for (const c of clients) {
+      const { data: clientRow, error: cErr } = await supabase
+        .from('clients')
+        .insert({
+          upload_id:       uploadRecord.id,
+          name:            c.name,
+          total_invested:  c.totalInvested,
+          total_current:   c.totalCurrent,
+          total_pnl:       c.totalPnL,
+          cash:            c.cash,
+          investment_date: c.investmentDate
+            ? c.investmentDate.toISOString().split('T')[0]
+            : null
+        })
+        .select()
+        .single();
+      if (cErr) throw cErr;
+
+      if (c.holdings.length > 0) {
+        const rows = c.holdings.map(h => ({
+          client_id:    clientRow.id,
+          symbol:       h.symbol,
+          name:         h.name,
+          qty:          h.qty,
+          unit_cost:    h.unitCost,
+          total_cost:   h.totalCost,
+          market_price: h.marketPrice,
+          market_value: h.marketValue,
+          pnl:          h.pnl,
+          pnl_pct:      h.pnlPct,
+          holding_pct:  h.holdingPct,
+          asset_class:  h.assetClass
+        }));
+        const { error: hErr } = await supabase.from('holdings').insert(rows);
+        if (hErr) throw hErr;
+        totalHoldings += rows.length;
+      }
+    }
+
+    res.json({
+      success:  true,
+      clients:  clients.length,
+      holdings: totalHoldings,
+      uploadId: uploadRecord.id,
+      message:  `Successfully loaded ${clients.length} clients and ${totalHoldings} holdings`
+    });
+
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;
