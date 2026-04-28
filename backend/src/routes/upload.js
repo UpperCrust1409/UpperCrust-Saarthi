@@ -84,10 +84,10 @@ function parseSheet(sheetName, rows) {
   const investDate = parseInvestDate(rows);
   const ofinCode = extractOFIN(rows);
  
-  // Use OFIN code for unique identification, fall back to sheet name
-  const baseName = sheetName.replace(/\(.*\)/, '').trim();
-  // Unique name = "ClientName(OFINCode)" - ensures uniqueness across funds
-  const uniqueName = ofinCode ? `${baseName}(${ofinCode})` : sheetName;
+  // Clean base name — remove any partial bracket from truncated sheet name
+  const baseName = sheetName.replace(/\(.*$/, '').trim();
+  // Unique name = "ClientName(OFINCode)" using OFIN from sheet content
+  const uniqueName = ofinCode ? `${baseName}(${ofinCode})` : baseName;
  
   const hdr = rows[hr];
   let cAC=-1,cD=-1,cQ=-1,cUC=-1,cTC=-1,cMP=-1,cMV=-1,cUG=-1,cHP=-1,cGP=-1;
