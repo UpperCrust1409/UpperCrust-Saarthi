@@ -4,7 +4,7 @@ const multer = require('multer');
 const XLSX = require('xlsx');
 const { supabase } = require('../db/supabase');
  
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
  
 // ── Detect fund name from sheet rows ──
 function detectFund(rows) {
@@ -17,18 +17,27 @@ function detectFund(rows) {
     'mupf': 'Uppercrust Prosperity Fund',
   };
   for (let i = 0; i < Math.min(25, rows.length); i++) {
-    const row = rows[i] || [];
-    const joined = row.join(' ').toLowerCase();
+    const joined = (rows[i] || []).join(' ').toLowerCase();
     for (const [key, fund] of Object.entries(FUND_MAP)) {
       if (joined.includes(key)) return fund;
     }
   }
-  return 'Uppercrust Wealth Fund'; // default
+  return 'Uppercrust Wealth Fund';
+}
+ 
+// ── Extract OFIN code from sheet content ──
+function extractOFIN(rows) {
+  for (let i = 0; i < Math.min(20, rows.length); i++) {
+    const joined = (rows[i] || []).join(' ');
+    const match = joined.match(/OFIN\s*Code\s*[:\-]\s*(\d+)/i);
+    if (match) return match[1].trim();
+  }
+  return null;
 }
  
 // ── Parse investment date ──
 function parseInvestDate(rows) {
-  const MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+  const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
   const DATE_PAT = /Date\s+of\s+Investment\s*[:\-]\s*(\d{1,2})[\/\-\s](\w{3,9})[\/\-\s](\d{4})/i;
   const DATE_PAT2 = /(\d{2})[\/\-](\w{3})[\/\-](\d{4})/;
   function tryParse(str) {
@@ -36,7 +45,7 @@ function parseInvestDate(rows) {
     let m = String(str).match(DATE_PAT);
     if (!m) m = String(str).match(DATE_PAT2);
     if (!m) return null;
-    const d = parseInt(m[1]), monStr = m[2].toLowerCase().slice(0, 3), y = parseInt(m[3]);
+    const d = parseInt(m[1]), monStr = m[2].toLowerCase().slice(0,3), y = parseInt(m[3]);
     const mon = MONTHS[monStr];
     if (isNaN(d) || mon === undefined || isNaN(y)) return null;
     return new Date(y, mon, d).toISOString();
@@ -46,7 +55,7 @@ function parseInvestDate(rows) {
     for (const v of row) {
       if (!v) continue;
       const vs = String(v);
-      if (vs.toLowerCase().includes('investment') || vs.toLowerCase().includes('date of')) {
+      if (vs.toLowerCase().includes('investment')) {
         const dt = tryParse(vs);
         if (dt) return dt;
       }
@@ -55,6 +64,11 @@ function parseInvestDate(rows) {
     if (dt && row.join(' ').toLowerCase().includes('investment')) return dt;
   }
   return null;
+}
+ 
+function nv(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = parseFloat(v); return isNaN(n) ? null : n;
 }
  
 // ── Parse one sheet ──
@@ -68,6 +82,12 @@ function parseSheet(sheetName, rows) {
  
   const fundName = detectFund(rows);
   const investDate = parseInvestDate(rows);
+  const ofinCode = extractOFIN(rows);
+ 
+  // Use OFIN code for unique identification, fall back to sheet name
+  const baseName = sheetName.replace(/\(.*\)/, '').trim();
+  // Unique name = "ClientName(OFINCode)" - ensures uniqueness across funds
+  const uniqueName = ofinCode ? `${baseName}(${ofinCode})` : sheetName;
  
   const hdr = rows[hr];
   let cAC=-1,cD=-1,cQ=-1,cUC=-1,cTC=-1,cMP=-1,cMV=-1,cUG=-1,cHP=-1,cGP=-1;
@@ -81,7 +101,6 @@ function parseSheet(sheetName, rows) {
   });
  
   const holdings = []; let curClass = '', cash = 0;
-  const name = sheetName.replace(/\(.*\)/, '').trim();
  
   for (let i = hr + 1; i < rows.length; i++) {
     const row = rows[i];
@@ -100,7 +119,19 @@ function parseSheet(sheetName, rows) {
     }
   }
  
-  // Parse true cost from summary section
+  if (cash === 0) {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r) continue;
+      if ((r||[]).join(' ').includes('BALANCE WITH BANKS')) {
+        for (let j = 0; j < r.length; j++) {
+          if (typeof r[j]==='number' && r[j]>0 && r[j]<1e9) { cash=r[j]; break; }
+        }
+      }
+    }
+  }
+ 
+  // Parse true cost from summary
   let trueCost = null, trueCurrentVal = null;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]; if (!row) continue;
@@ -119,17 +150,18 @@ function parseSheet(sheetName, rows) {
   const pl = effectiveCurrent - effectiveCost;
  
   return {
-    name, sn: sheetName, fundName, investDate, holdings, cash,
+    name: uniqueName,
+    displayName: baseName,
+    ofinCode,
+    fundName,
+    investDate,
+    holdings,
+    cash,
     totalInvested: effectiveCost,
     totalCurrent: effectiveCurrent,
     totalPnL: pl,
     totalPnLPct: effectiveCost > 0 ? pl / effectiveCost : 0
   };
-}
- 
-function nv(v) {
-  if (v === null || v === undefined || v === '') return null;
-  const n = parseFloat(v); return isNaN(n) ? null : n;
 }
  
 // POST /api/upload
@@ -145,21 +177,21 @@ router.post('/', upload.single('file'), async (req, res) => {
       const ws = wb.Sheets[sn];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
       const c = parseSheet(sn, rows);
-      if (c) clients.push(c);
+      if (c && c.holdings.length > 0) clients.push(c);
     });
  
     if (!clients.length) return res.status(400).json({ error: 'No valid client sheets found' });
  
     // Clear existing data
-    await supabase.from('holdings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('clients').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const { error: delH } = await supabase.from('holdings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const { error: delC } = await supabase.from('clients').delete().neq('id', '00000000-0000-0000-0000-000000000000');
  
     // Create upload record
     const { data: uploadRec, error: upErr } = await supabase
       .from('uploads').insert({ filename: req.file.originalname }).select().single();
     if (upErr) throw upErr;
  
-    // Insert clients
+    // Insert clients in batches
     const clientRecords = clients.map(c => ({
       name: c.name,
       fund_name: c.fundName,
@@ -179,7 +211,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     const clientIdMap = {};
     insertedClients.forEach(c => { clientIdMap[c.name] = c.id; });
  
-    // Insert all holdings
+    // Insert all holdings in batches of 500
     const allHoldings = [];
     clients.forEach(c => {
       const clientId = clientIdMap[c.name];
@@ -202,19 +234,19 @@ router.post('/', upload.single('file'), async (req, res) => {
       });
     });
  
-    // Insert in batches of 500
     for (let i = 0; i < allHoldings.length; i += 500) {
       const batch = allHoldings.slice(i, i + 500);
       const { error: hErr } = await supabase.from('holdings').insert(batch);
       if (hErr) throw hErr;
     }
  
+    const funds = [...new Set(clients.map(c => c.fundName))];
     res.json({
       success: true,
-      message: `Uploaded ${clients.length} clients with ${allHoldings.length} holdings`,
+      message: `Uploaded ${clients.length} portfolios with ${allHoldings.length} holdings`,
       clients: clients.length,
       holdings: allHoldings.length,
-      funds: [...new Set(clients.map(c => c.fundName))]
+      funds
     });
  
   } catch (err) {
