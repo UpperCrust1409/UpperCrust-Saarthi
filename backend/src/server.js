@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-
 const authRoutes      = require('./routes/auth');
 const uploadRoutes    = require('./routes/upload');
 const clientRoutes    = require('./routes/clients');
@@ -13,12 +12,11 @@ const riskRoutes      = require('./routes/risk');
 const tagsRoutes      = require('./routes/tags');
 const holdingsRoutes  = require('./routes/holdings');
 const metaRoutes      = require('./routes/meta');
+const registerFIFORoutes = require('./routes/fifo');
 
 const app = express();
-
 app.set('trust proxy', 1);
 
-// ── CORS — must be before helmet ──
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
@@ -26,7 +24,6 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: false
@@ -43,8 +40,8 @@ const authLimiter = rateLimit({
   max: 20,
   message: { error: 'Too many login attempts. Try again later.' }
 });
-app.use(limiter);
 
+app.use(limiter);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -60,8 +57,12 @@ app.use('/api/tags',      tagsRoutes);
 app.use('/api/holdings',  holdingsRoutes);
 app.use('/api/meta',      metaRoutes);
 
-app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+// ── FIFO Tax Engine ──
+const { createClient } = require('@supabase/supabase-js');
+const _supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY);
+registerFIFORoutes(app, _supabase);
 
+app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err.message, err.stack);
   res.status(err.status || 500).json({
