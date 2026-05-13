@@ -6,13 +6,13 @@
 //
 // Wire: registerFIFORoutes(app, supabase);  // before app.listen()
 // ══════════════════════════════════════════════════════════════
-
+ 
 const multer = require('multer');
 const XLSX   = require('xlsx');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
-
+ 
 const TAX = { stcg: 0.20, ltcg: 0.125, ltcgDays: 365 };
-
+ 
 function parseSheet(ws) {
   const txns = [];
   let section = 'Equity';
@@ -40,7 +40,7 @@ function parseSheet(ws) {
   }
   return txns.sort((a,b) => a.date.localeCompare(b.date));
 }
-
+ 
 function buildFIFO(txns) {
   const lots = {};
   const realized = [];
@@ -73,11 +73,11 @@ function buildFIFO(txns) {
   }
   return { lots: openLots, realized };
 }
-
+ 
 function extractClientName(sheetName) {
   return sheetName.replace(/\(\d+\)\s*$/, '').replace(/\(\d*\s*$/, '').trim();
 }
-
+ 
 async function upsertClientFIFO(supabase, clientName, sheetName, data, txnCount) {
   const { error } = await supabase.from('client_fifo').upsert(
     { client_name: clientName, sheet_name: sheetName, data, txn_count: txnCount, updated_at: new Date().toISOString() },
@@ -85,7 +85,7 @@ async function upsertClientFIFO(supabase, clientName, sheetName, data, txnCount)
   );
   if (error) throw new Error(`${clientName}: ${error.message}`);
 }
-
+ 
 async function getClientFIFO(supabase, clientName) {
   let { data } = await supabase.from('client_fifo').select('client_name,data,txn_count,updated_at')
     .eq('client_name', clientName).single();
@@ -97,9 +97,9 @@ async function getClientFIFO(supabase, clientName) {
   }
   return data;
 }
-
+ 
 module.exports = function registerFIFORoutes(app, supabase) {
-
+ 
   // POST /api/fifo/upload — master XLS with all client sheets
   app.post('/api/fifo/upload', upload.single('file'), async (req, res) => {
     try {
@@ -125,7 +125,7 @@ module.exports = function registerFIFORoutes(app, supabase) {
       res.json({ ok: true, clients: processed, totalTxns, errors: errors.slice(0,5) });
     } catch(err) { console.error('[fifo/upload]', err); res.status(500).json({ error: err.message }); }
   });
-
+ 
   // GET /api/fifo/client?name=...
   app.get('/api/fifo/client', async (req, res) => {
     try {
@@ -135,7 +135,7 @@ module.exports = function registerFIFORoutes(app, supabase) {
       res.json({ ok: true, data: row?.data || null, matchedName: row?.client_name });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
-
+ 
   // GET /api/fifo/status
   app.get('/api/fifo/status', async (req, res) => {
     try {
@@ -147,7 +147,29 @@ module.exports = function registerFIFORoutes(app, supabase) {
       res.json({ ok:true, clients: count||0, totalTxns, uploadedAt: latest?.[0]?.updated_at||null });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
-
+ 
+  // GET /api/fifo/all — bulk fetch all clients for frontend cache
+  app.get('/api/fifo/all', async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from('client_fifo')
+        .select('client_name, data, txn_count');
+      if (error) throw new Error(error.message);
+      // Build { clientName: {lots, realized, txnCount} }
+      const clients = {};
+      for (const row of (data || [])) {
+        clients[row.client_name] = {
+          ...row.data,
+          txnCount: row.txn_count
+        };
+      }
+      res.json({ ok: true, clients, count: Object.keys(clients).length });
+    } catch(err) {
+      console.error('[fifo/all]', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+ 
   // GET /api/fifo/tax-preview?client=&isin=&qty=&sellPrice=
   app.get('/api/fifo/tax-preview', async (req, res) => {
     try {
