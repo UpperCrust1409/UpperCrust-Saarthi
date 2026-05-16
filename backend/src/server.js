@@ -181,7 +181,7 @@ app.post('/api/claude', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5',
-        max_tokens: 1500,
+        max_tokens: 4096,
         system: system || '',
         messages: messages,
       }),
@@ -231,7 +231,7 @@ Return empty array [] if nothing important to remember. Be selective — only ex
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
         model: 'claude-haiku-4-5',
-        max_tokens: 500,
+        max_tokens: 800,
         messages: [{ role: 'user', content: extractPrompt }],
       }),
     });
