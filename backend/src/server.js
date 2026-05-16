@@ -61,8 +61,40 @@ app.use('/api/meta',      metaRoutes);
 
 // ── FIFO Tax Engine ──
 const { createClient } = require('@supabase/supabase-js');
-const _supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY);
+const _supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
+);
 registerFIFORoutes(app, _supabase);
+
+// ── App Settings (read/write key-value pairs in Supabase) ──
+app.get('/api/settings/:key', async (req, res) => {
+  try {
+    const { data, error } = await _supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', req.params.key)
+      .single();
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json({ value: data?.value || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/settings/:key', async (req, res) => {
+  try {
+    const { value } = req.body;
+    if (!value) return res.status(400).json({ error: 'Value required' });
+    const { error } = await _supabase
+      .from('app_settings')
+      .upsert({ key: req.params.key, value, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── Claude AI Proxy ──
 app.post('/api/claude', async (req, res) => {
