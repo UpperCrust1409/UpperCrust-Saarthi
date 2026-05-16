@@ -24,6 +24,7 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: false
@@ -35,6 +36,7 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -62,7 +64,35 @@ const { createClient } = require('@supabase/supabase-js');
 const _supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY);
 registerFIFORoutes(app, _supabase);
 
+// ── Claude AI Proxy ──
+app.post('/api/claude', async (req, res) => {
+  try {
+    const { apiKey, system, messages } = req.body;
+    if (!apiKey || !apiKey.startsWith('sk-ant-'))
+      return res.status(400).json({ error: { message: 'Invalid API key' } });
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 1024,
+        system: system || '',
+        messages: messages,
+      }),
+    });
+    const data = await response.json();
+    res.status(response.ok ? 200 : response.status).json(data);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err.message, err.stack);
   res.status(err.status || 500).json({
