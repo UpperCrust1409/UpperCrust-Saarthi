@@ -6,7 +6,7 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const webpush = require('web-push');
 const cron = require('node-cron');
-
+ 
 const authRoutes      = require('./routes/auth');
 const uploadRoutes    = require('./routes/upload');
 const clientRoutes    = require('./routes/clients');
@@ -17,10 +17,10 @@ const tagsRoutes      = require('./routes/tags');
 const holdingsRoutes  = require('./routes/holdings');
 const metaRoutes      = require('./routes/meta');
 const registerFIFORoutes = require('./routes/fifo');
-
+ 
 const app = express();
 app.set('trust proxy', 1);
-
+ 
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
@@ -28,18 +28,18 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-
+ 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: false }));
-
+ 
 const limiter = rateLimit({ windowMs: 15*60*1000, max: 2000, standardHeaders: true, legacyHeaders: false });
 const authLimiter = rateLimit({ windowMs: 15*60*1000, max: 20, message: { error: 'Too many login attempts.' } });
-
+ 
 app.use(limiter);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-
+ 
 app.get('/health', (req, res) => res.json({ status: 'ok', ts: new Date() }));
-
+ 
 app.use('/api/auth',      authLimiter, authRoutes);
 app.use('/api/upload',    uploadRoutes);
 app.use('/api/clients',   clientRoutes);
@@ -49,7 +49,7 @@ app.use('/api/risk',      riskRoutes);
 app.use('/api/tags',      tagsRoutes);
 app.use('/api/holdings',  holdingsRoutes);
 app.use('/api/meta',      metaRoutes);
-
+ 
 // ── Supabase ──
 const { createClient } = require('@supabase/supabase-js');
 const _supabase = createClient(
@@ -57,7 +57,7 @@ const _supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 );
 registerFIFORoutes(app, _supabase);
-
+ 
 // ── App Settings ──
 app.get('/api/settings/:key', async (req, res) => {
   try {
@@ -66,7 +66,7 @@ app.get('/api/settings/:key', async (req, res) => {
     res.json({ value: data?.value || null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.post('/api/settings/:key', async (req, res) => {
   try {
     const { value } = req.body;
@@ -76,7 +76,7 @@ app.post('/api/settings/:key', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── Saarthi Memory ──
 app.get('/api/memory', async (req, res) => {
   try {
@@ -85,7 +85,7 @@ app.get('/api/memory', async (req, res) => {
     res.json({ memories: data || [] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.post('/api/memory', async (req, res) => {
   try {
     const { memories } = req.body;
@@ -96,7 +96,7 @@ app.post('/api/memory', async (req, res) => {
     res.json({ ok: true, saved: data.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.delete('/api/memory/:id', async (req, res) => {
   try {
     const { error } = await _supabase.from('saarthi_memory').update({ active: false, updated_at: new Date().toISOString() }).eq('id', req.params.id);
@@ -104,7 +104,7 @@ app.delete('/api/memory/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.patch('/api/memory/:id', async (req, res) => {
   try {
     const { importance, memory, active } = req.body;
@@ -117,7 +117,7 @@ app.patch('/api/memory/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── Claude AI Proxy ──
 app.post('/api/claude', async (req, res) => {
   try {
@@ -132,7 +132,7 @@ app.post('/api/claude', async (req, res) => {
     res.status(response.ok ? 200 : response.status).json(data);
   } catch (err) { res.status(500).json({ error: { message: err.message } }); }
 });
-
+ 
 app.post('/api/claude/extract-memory', async (req, res) => {
   try {
     const { apiKey, conversation, existing_memories } = req.body;
@@ -150,7 +150,7 @@ app.post('/api/claude/extract-memory', async (req, res) => {
     res.json({ memories });
   } catch (err) { res.status(500).json({ memories: [], error: err.message }); }
 });
-
+ 
 // ════════════════════════════════════════════════════════════════
 //  SERVICE WORKER + PWA MANIFEST
 // ════════════════════════════════════════════════════════════════
@@ -159,7 +159,7 @@ app.get('/sw.js', (req, res) => {
   res.setHeader('Service-Worker-Allowed', '/');
   res.sendFile(path.join(__dirname, 'sw.js'));
 });
-
+ 
 app.get('/manifest.json', (req, res) => {
   res.json({
     name: 'Saarthi PMS',
@@ -175,21 +175,21 @@ app.get('/manifest.json', (req, res) => {
     ]
   });
 });
-
+ 
 // ════════════════════════════════════════════════════════════════
 //  PUSH NOTIFICATIONS
 // ════════════════════════════════════════════════════════════════
 const VAPID_PUBLIC_KEY  = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_EMAIL       = process.env.VAPID_EMAIL || 'mailto:admin@uppercrustsaarthi.in';
-
+ 
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
   console.log('[Push] VAPID configured ✓');
 } else {
   console.warn('[Push] VAPID keys missing — push disabled. Run: npx web-push generate-vapid-keys');
 }
-
+ 
 async function sendPushToAll(title, body, url, opts = {}) {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return 0;
   try {
@@ -210,11 +210,11 @@ async function sendPushToAll(title, body, url, opts = {}) {
     return sent;
   } catch (err) { console.error('[Push]', err.message); return 0; }
 }
-
+ 
 app.get('/api/push/vapid-key', (req, res) => {
   res.json({ publicKey: VAPID_PUBLIC_KEY || null });
 });
-
+ 
 app.post('/api/push/subscribe', async (req, res) => {
   try {
     const { subscription, device } = req.body;
@@ -227,7 +227,7 @@ app.post('/api/push/subscribe', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.post('/api/push/unsubscribe', async (req, res) => {
   try {
     const { endpoint } = req.body;
@@ -235,7 +235,7 @@ app.post('/api/push/unsubscribe', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.post('/api/push/queue', async (req, res) => {
   try {
     const { cat, title, body, url, priority } = req.body;
@@ -249,7 +249,7 @@ app.post('/api/push/queue', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── Drain queue every minute ──
 cron.schedule('* * * * *', async () => {
   if (!VAPID_PUBLIC_KEY) return;
@@ -262,7 +262,7 @@ cron.schedule('* * * * *', async () => {
     }
   } catch (err) { console.error('[Cron queue]', err.message); }
 });
-
+ 
 // ── Morning digest 8:30am weekdays ──
 cron.schedule('30 8 * * 1-5', async () => {
   try {
@@ -273,7 +273,7 @@ cron.schedule('30 8 * * 1-5', async () => {
     await sendPushToAll('🌅 Good Morning — UpperCrust PMS', `AUM: ₹${(aum/10000000).toFixed(2)}Cr · ${winners}/${clients.length} clients in profit`, 'https://uppercrustsaarthi.in', { tag: 'morning_'+new Date().toDateString() });
   } catch (err) { console.error('[Cron morning]', err.message); }
 }, { timezone: 'Asia/Kolkata' });
-
+ 
 // ── Evening summary 3:45pm weekdays ──
 cron.schedule('45 15 * * 1-5', async () => {
   try {
@@ -285,7 +285,7 @@ cron.schedule('45 15 * * 1-5', async () => {
     await sendPushToAll('📊 Pre-Close — UpperCrust PMS', `P&L: ${sign}₹${(Math.abs(pnl)/100000).toFixed(1)}L (${sign}${inv>0?(pnl/inv*100).toFixed(2):0}%) · 15min to close`, 'https://uppercrustsaarthi.in', { tag: 'evening_'+new Date().toDateString() });
   } catch (err) { console.error('[Cron evening]', err.message); }
 }, { timezone: 'Asia/Kolkata' });
-
+ 
 // ── Anniversary check 9am daily ──
 cron.schedule('0 9 * * *', async () => {
   try {
@@ -306,7 +306,7 @@ cron.schedule('0 9 * * *', async () => {
     }
   } catch (err) { console.error('[Cron anniversary]', err.message); }
 }, { timezone: 'Asia/Kolkata' });
-
+ 
 // ── Weekly digest Monday 9am ──
 cron.schedule('0 9 * * 1', async () => {
   try {
@@ -318,7 +318,7 @@ cron.schedule('0 9 * * 1', async () => {
     await sendPushToAll('📈 Weekly Digest — UpperCrust PMS', `Best: ${top.name} +${top.pct.toFixed(1)}% · Review: ${bot.name} ${bot.pct.toFixed(1)}%`, 'https://uppercrustsaarthi.in', { tag: 'weekly_'+new Date().toDateString() });
   } catch (err) { console.error('[Cron weekly]', err.message); }
 }, { timezone: 'Asia/Kolkata' });
-
+ 
 // ── Cleanup sent notifications 2am daily ──
 cron.schedule('0 2 * * *', async () => {
   try {
@@ -326,19 +326,19 @@ cron.schedule('0 2 * * *', async () => {
     await _supabase.from('pending_notifications').delete().eq('sent', true).lt('created_at', cutoff);
   } catch (err) { console.error('[Cron cleanup]', err.message); }
 }, { timezone: 'Asia/Kolkata' });
-
+ 
 console.log('[Cron] Scheduled: 8:30am, 15:45, 9:00am daily, Monday 9am, 2am cleanup');
-
+ 
 // ════════════════════════════════════════════════════════════════
 //  KITE LIVE DATA — Zerodha API Integration
 // ════════════════════════════════════════════════════════════════
 const KITE_API_KEY    = process.env.KITE_API_KEY    || 'bj9g3wng1t91splw';
 const KITE_API_SECRET = process.env.KITE_API_SECRET || '08f2h7jfdl50d127dzynuq43a8y5f66e';
 const KITE_BASE       = 'https://api.kite.trade';
-
+ 
 let _kiteToken = null;
 let _kiteTokenExpiry = null;
-
+ 
 async function _loadKiteToken() {
   try {
     const { data } = await _supabase.from('app_settings').select('value').eq('key', 'kite_access_token').single();
@@ -353,17 +353,17 @@ async function _loadKiteToken() {
   } catch(e) { /* no token yet */ }
 }
 _loadKiteToken();
-
+ 
 async function _saveKiteToken(token, expiry) {
   _kiteToken = token;
   _kiteTokenExpiry = expiry;
   await _supabase.from('app_settings').upsert({ key: 'kite_access_token', value: JSON.stringify({ token, expiry }), updated_at: new Date().toISOString() });
 }
-
+ 
 app.get('/api/kite/login-url', (req, res) => {
   res.json({ url: `https://kite.zerodha.com/connect/login?v=3&api_key=${KITE_API_KEY}` });
 });
-
+ 
 app.get('/api/kite/callback', async (req, res) => {
   const { request_token, status } = req.query;
   if (status !== 'success' || !request_token) return res.redirect('https://uppercrustsaarthi.in?kite_error=1');
@@ -384,17 +384,17 @@ app.get('/api/kite/callback', async (req, res) => {
     res.redirect('https://uppercrustsaarthi.in?kite_auth=success');
   } catch (err) { console.error('[Kite callback error]', err); res.redirect('https://uppercrustsaarthi.in?kite_error=3'); }
 });
-
+ 
 async function _kiteGet(path) {
   if (!_kiteToken) return { error: 'not_authenticated' };
   const resp = await fetch(`${KITE_BASE}${path}`, { headers: { 'Authorization': `token ${KITE_API_KEY}:${_kiteToken}`, 'X-Kite-Version': '3' } });
   return resp.json();
 }
-
+ 
 app.get('/api/kite/status', (req, res) => {
   res.json({ connected: !!_kiteToken && !!_kiteTokenExpiry && new Date(_kiteTokenExpiry) > new Date(), expiry: _kiteTokenExpiry, apiKey: KITE_API_KEY });
 });
-
+ 
 app.get('/api/kite/quote', async (req, res) => {
   try {
     const { symbols } = req.query;
@@ -403,7 +403,7 @@ app.get('/api/kite/quote', async (req, res) => {
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.get('/api/kite/ltp', async (req, res) => {
   try {
     const { symbols } = req.query;
@@ -412,7 +412,7 @@ app.get('/api/kite/ltp', async (req, res) => {
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.get('/api/kite/ohlc', async (req, res) => {
   try {
     const { symbols } = req.query;
@@ -421,7 +421,7 @@ app.get('/api/kite/ohlc', async (req, res) => {
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.get('/api/kite/historical', async (req, res) => {
   try {
     const { symbol, interval, from, to } = req.query;
@@ -434,56 +434,76 @@ app.get('/api/kite/historical', async (req, res) => {
     res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── Portfolio live — with NSE/BSE fallback for ETFs ──────────────
-const BSE_KEYWORDS = ['BEES','GOLDETF','SILVERBEES','LIQUIDBEES','GOLDBEES','NIFTYBEES','BANKBEES','JUNIORBEES','MON100','CPSEETF','BHARAT22','CPSE','SETFGOLD','SETF'];
+const BSE_KEYWORDS = ['BEES','GOLDETF','SILVERBEES','LIQUIDBEES','GOLDBEES','NIFTYBEES','BANKBEES','JUNIORBEES','MON100','CPSEETF','BHARAT22','CPSE','SETFGOLD','SETF','ICICILIQ','HDFCLIQ','SBIETF','KOTAKGOLD','AXISGOLD','MAFSETF','ICICIPHD'];
 function guessExchange(sym) {
   const u = (sym||'').toUpperCase();
+  // These are confirmed NSE ETFs
+  const NSE_ETFS = ['NIFTYBEES','BANKBEES','JUNIORBEES','LIQUIDBEES','INFRABEES','PSUBNKBEES','ITBEES','SHARIABEES','DIVOPPBEES','MIDCAPETF','LOWVOLBEES'];
+  if (NSE_ETFS.some(k => u === k)) return 'NSE';
   if (BSE_KEYWORDS.some(k => u.includes(k))) return 'BSE';
   return 'NSE';
 }
-
+ 
 app.post('/api/kite/portfolio-live', async (req, res) => {
   try {
     if (!_kiteToken) return res.json({ error: 'not_authenticated', connected: false });
     const { symbols } = req.body;
     if (!symbols || !symbols.length) return res.status(400).json({ error: 'symbols array required' });
-
-    const kiteSymbols = symbols.map(s => `${s.exchange || guessExchange(s.symbol)}:${s.symbol}`);
-    const batches = [];
-    for (let i = 0; i < kiteSymbols.length; i += 500) batches.push(kiteSymbols.slice(i, i+500));
-
-    const allData = {};
-    for (const batch of batches) {
-      const data = await _kiteGet(`/quote/ltp?i=${batch.join('&i=')}`);
-      if (data.data) Object.assign(allData, data.data);
-    }
-
-    // Retry not-found symbols on the other exchange
-    const notFound = symbols.filter(s => !allData[`${s.exchange || guessExchange(s.symbol)}:${s.symbol}`]);
-    if (notFound.length) {
-      const retrySyms = notFound.map(s => { const orig = s.exchange || guessExchange(s.symbol); return `${orig==='NSE'?'BSE':'NSE'}:${s.symbol}`; });
-      const retryData = await _kiteGet(`/quote/ltp?i=${retrySyms.join('&i=')}`);
-      if (retryData.data) Object.assign(allData, retryData.data);
-    }
-
-    const result = symbols.map(s => {
-      const exch = s.exchange || guessExchange(s.symbol);
-      const liveQ = allData[`${exch}:${s.symbol}`] || allData[`${exch==='NSE'?'BSE':'NSE'}:${s.symbol}`];
-      const ltp = liveQ?.last_price || s.avgCost || 0;
-      const mv = ltp * (s.qty||0);
-      const cost = (s.avgCost||0) * (s.qty||0);
-      return { symbol: s.symbol, qty: s.qty, avgCost: s.avgCost, ltp, marketValue: mv, cost, pnl: mv-cost, pnlPct: cost>0?(mv-cost)/cost:0, live: !!liveQ };
+ 
+    // Build BOTH NSE and BSE symbols for every holding — let Kite return what it has
+    // This is the most reliable approach — no guessing needed
+    const allSymsToFetch = [];
+    symbols.forEach(s => {
+      allSymsToFetch.push(`NSE:${s.symbol}`);
+      allSymsToFetch.push(`BSE:${s.symbol}`);
     });
-
+ 
+    // Batch in groups of 500
+    const allData = {};
+    for (let i = 0; i < allSymsToFetch.length; i += 500) {
+      const batch = allSymsToFetch.slice(i, i + 500);
+      try {
+        const data = await _kiteGet(`/quote/ltp?i=${batch.join('&i=')}`);
+        if (data.data) Object.assign(allData, data.data);
+      } catch(e) { /* continue with what we have */ }
+    }
+ 
+    // For each symbol, use NSE price first, BSE as fallback
+    const result = symbols.map(s => {
+      const nseQ = allData[`NSE:${s.symbol}`];
+      const bseQ = allData[`BSE:${s.symbol}`];
+      const liveQ = nseQ || bseQ;  // prefer NSE, fallback to BSE
+      const ltp   = liveQ?.last_price || s.avgCost || 0;
+      const mv    = ltp * (s.qty || 0);
+      const cost  = (s.avgCost || 0) * (s.qty || 0);
+      return {
+        symbol:      s.symbol,
+        qty:         s.qty,
+        avgCost:     s.avgCost,
+        ltp,
+        marketValue: mv,
+        cost,
+        pnl:         mv - cost,
+        pnlPct:      cost > 0 ? (mv - cost) / cost : 0,
+        live:        !!liveQ,
+        exchange:    nseQ ? 'NSE' : bseQ ? 'BSE' : '—'
+      };
+    });
+ 
     res.json({
       connected: true, holdings: result,
-      summary: { totalLive: result.reduce((s,r)=>s+r.marketValue,0), totalCost: result.reduce((s,r)=>s+r.cost,0), totalPnL: result.reduce((s,r)=>s+r.pnl,0) },
+      summary: {
+        totalLive: result.reduce((s,r) => s + r.marketValue, 0),
+        totalCost: result.reduce((s,r) => s + r.cost, 0),
+        totalPnL:  result.reduce((s,r) => s + r.pnl, 0)
+      },
       ts: new Date().toISOString()
     });
   } catch (err) { console.error('[portfolio-live]', err); res.status(500).json({ error: err.message }); }
 });
-
+ 
 app.get('/api/kite/search', async (req, res) => {
   try {
     const { q } = req.query;
@@ -491,7 +511,7 @@ app.get('/api/kite/search', async (req, res) => {
     res.json({ results: [], note: 'Use direct symbol with exchange prefix e.g. NSE:RELIANCE' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── World Indices ──
 app.get('/api/world-indices', async (req, res) => {
   try {
@@ -515,13 +535,13 @@ app.get('/api/world-indices', async (req, res) => {
     res.json({ indices: [], source: 'Unavailable', error: err.message });
   }
 });
-
+ 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err.message, err.stack);
   res.status(err.status || 500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message });
 });
-
+ 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Saarthi backend running on :${PORT}`));
 module.exports = app;
