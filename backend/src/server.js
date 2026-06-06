@@ -196,7 +196,13 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
  
 // Apply auth middleware globally from here
 // (public routes above are already registered)
-app.use('/api/upload',    requireAuth, require('./routes/upload'));
+// Pass service-key supabase to upload route so it bypasses RLS
+const uploadRouter = require('./routes/upload');
+uploadRouter._supabase = null; // will be set below after _supabase is created
+app.use('/api/upload', requireAuth, (req, res, next) => {
+  req.supabase = _supabase; // inject service key client
+  next();
+}, uploadRouter);
 app.use('/api/clients',   requireAuth, require('./routes/clients'));
 app.use('/api/stocks',    requireAuth, require('./routes/stocks'));
 app.use('/api/dashboard', requireAuth, require('./routes/dashboard'));
@@ -741,3 +747,4 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Saarthi backend secured on :${PORT}`));
 module.exports = app;
+ 
