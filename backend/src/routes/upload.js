@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const XLSX = require('xlsx');
-const { supabase } = require('../db/supabase');
  
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
  
@@ -84,9 +83,7 @@ function parseSheet(sheetName, rows) {
   const investDate = parseInvestDate(rows);
   const ofinCode = extractOFIN(rows);
  
-  // Clean base name — remove any partial bracket from truncated sheet name
   const baseName = sheetName.replace(/\(.*$/, '').trim();
-  // Unique name = "ClientName(OFINCode)" using OFIN from sheet content
   const uniqueName = ofinCode ? `${baseName}(${ofinCode})` : baseName;
  
   const hdr = rows[hr];
@@ -131,7 +128,6 @@ function parseSheet(sheetName, rows) {
     }
   }
  
-  // Parse true cost from summary
   let trueCost = null, trueCurrentVal = null;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]; if (!row) continue;
@@ -169,9 +165,12 @@ router.post('/', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
  
+    // Use service-key supabase injected by server.js — bypasses RLS
+    const supabase = req.supabase;
+    if (!supabase) return res.status(500).json({ error: 'Database not configured' });
+ 
     const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
  
-    // Parse all sheets
     const clients = [];
     wb.SheetNames.forEach(sn => {
       const ws = wb.Sheets[sn];
@@ -183,15 +182,15 @@ router.post('/', upload.single('file'), async (req, res) => {
     if (!clients.length) return res.status(400).json({ error: 'No valid client sheets found' });
  
     // Clear existing data
-    const { error: delH } = await supabase.from('holdings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    const { error: delC } = await supabase.from('clients').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('holdings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('clients').delete().neq('id', '00000000-0000-0000-0000-000000000000');
  
     // Create upload record
     const { data: uploadRec, error: upErr } = await supabase
       .from('uploads').insert({ filename: req.file.originalname }).select().single();
     if (upErr) throw upErr;
  
-    // Insert clients in batches
+    // Insert clients
     const clientRecords = clients.map(c => ({
       name: c.name,
       fund_name: c.fundName,
@@ -207,11 +206,10 @@ router.post('/', upload.single('file'), async (req, res) => {
       .from('clients').insert(clientRecords).select();
     if (cErr) throw cErr;
  
-    // Build name → id map
     const clientIdMap = {};
     insertedClients.forEach(c => { clientIdMap[c.name] = c.id; });
  
-    // Insert all holdings in batches of 500
+    // Insert holdings in batches of 500
     const allHoldings = [];
     clients.forEach(c => {
       const clientId = clientIdMap[c.name];
@@ -235,22 +233,30 @@ router.post('/', upload.single('file'), async (req, res) => {
     });
  
     for (let i = 0; i < allHoldings.length; i += 500) {
-      const batch = allHoldings.slice(i, i + 500);
-      const { error: hErr } = await supabase.from('holdings').insert(batch);
+      const { error: hErr } = await supabase.from('holdings').insert(allHoldings.slice(i, i + 500));
       if (hErr) throw hErr;
     }
  
-    const funds = [...new Set(clients.map(c => c.fundName))];
+    // Log the upload
+    if (req.user) {
+      supabase.from('audit_log').insert({
+        user_id: req.user.id,
+        action: 'PORTFOLIO_UPLOAD',
+        meta: JSON.stringify({ clients: clients.length, holdings: allHoldings.length, file: req.file.originalname }),
+        created_at: new Date().toISOString()
+      }).then(()=>{}).catch(()=>{});
+    }
+ 
     res.json({
       success: true,
       message: `Uploaded ${clients.length} portfolios with ${allHoldings.length} holdings`,
       clients: clients.length,
       holdings: allHoldings.length,
-      funds
+      funds: [...new Set(clients.map(c => c.fundName))]
     });
  
   } catch (err) {
-    console.error('Upload error:', err);
+    console.error('[Upload error]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
