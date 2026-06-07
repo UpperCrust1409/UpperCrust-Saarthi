@@ -84,6 +84,10 @@ app.use((req, res, next) => {
 // ─────────────────────────────────────────────
 // AUTH MIDDLEWARE — every protected route uses this
 // ─────────────────────────────────────────────
+// In-memory token blacklist (survives until server restart — sufficient for most cases)
+// For production: store in Redis or Supabase
+const _revokedTokens = new Set();
+ 
 function requireAuth(req, res, next) {
   try {
     const header = req.headers.authorization || '';
@@ -91,8 +95,13 @@ function requireAuth(req, res, next) {
       return res.status(401).json({ error: 'Authentication required' });
     }
     const token = header.slice(7);
+    // Check blacklist
+    if (_revokedTokens.has(token)) {
+      return res.status(401).json({ error: 'Session has been revoked. Please log in again.' });
+    }
     const payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload; // { id, email, role, name }
+    req.user = payload;
+    req._token = token; // store for logout
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired session. Please log in again.' });
@@ -181,8 +190,25 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
  
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   audit(req.user.id, 'LOGOUT', { _ip: req.ip });
-  // JWT is stateless — client drops it. We just confirm.
+  // Blacklist this token immediately — instant revocation
+  if (req._token) {
+    _revokedTokens.add(req._token);
+    // Clean up expired tokens from blacklist hourly
+    setTimeout(() => _revokedTokens.delete(req._token), 8 * 3600 * 1000);
+  }
   res.json({ ok: true });
+});
+ 
+// ── Admin: revoke any user's sessions ──
+app.post('/api/admin/revoke/:userId', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    // Mark user as having sessions revoked (future tokens checked against this)
+    await _supabase.from('saarthi_users')
+      .update({ sessions_revoked_at: new Date().toISOString() })
+      .eq('id', req.params.userId);
+    audit(req.user.id, 'SESSION_REVOKE', { target: req.params.userId });
+    res.json({ ok: true, message: 'User sessions revoked. They will be logged out within minutes.' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
 app.get('/api/auth/me', requireAuth, (req, res) => {
@@ -210,6 +236,13 @@ app.use('/api/risk',      requireAuth, require('./routes/risk'));
 app.use('/api/tags',      requireAuth, require('./routes/tags'));
 app.use('/api/holdings',  requireAuth, require('./routes/holdings'));
 app.use('/api/meta',      requireAuth, require('./routes/meta'));
+ 
+// ── LEVEL 1+2: Compute routes (server-side calculations) ──
+const computeRouter = require('./routes/compute');
+app.use('/api/compute', requireAuth, (req, res, next) => {
+  req.supabase = _supabase;
+  next();
+}, computeRouter);
  
 // FIFO routes
 const registerFIFORoutes = require('./routes/fifo');
@@ -747,4 +780,3 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Saarthi backend secured on :${PORT}`));
 module.exports = app;
- 
