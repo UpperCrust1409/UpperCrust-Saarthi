@@ -334,13 +334,24 @@ app.post('/api/settings/:key', requireAuth, async (req, res) => {
   try {
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
-    // Use service key client directly to bypass RLS
     const sb = global._supabase || _supabase;
-    const { error } = await sb.from('app_settings').upsert({
-      key: req.params.key, value, updated_at: new Date().toISOString()
-    }, { onConflict: 'key' });
-    if (error) { console.error('[Settings] upsert error:', error.message, 'key:', req.params.key, 'svc_key_set:', !!process.env.SUPABASE_SERVICE_KEY); throw error; }
-    audit(req.user.id, 'SETTINGS_UPDATE', { key: req.params.key });
+    const key = req.params.key;
+    // Use raw SQL via rpc to completely bypass RLS
+    const { error: rpcErr } = await sb.rpc('upsert_app_setting', {
+      p_key: key, p_value: value
+    });
+    if (rpcErr) {
+      // Fallback: try direct update then insert
+      const { error: upErr } = await sb.from('app_settings')
+        .update({ value, updated_at: new Date().toISOString() })
+        .eq('key', key);
+      if (upErr) {
+        const { error: inErr } = await sb.from('app_settings')
+          .insert({ key, value, updated_at: new Date().toISOString() });
+        if (inErr) { console.error('[Settings] all writes failed:', inErr.message, 'key:', key); throw inErr; }
+      }
+    }
+    audit(req.user.id, 'SETTINGS_UPDATE', { key });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -361,10 +372,19 @@ app.post('/api/meta/:key', requireAuth, async (req, res) => {
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
     // Use service key client directly to bypass RLS
     const sb = global._supabase || _supabase;
-    const { error } = await sb.from('app_settings').upsert({
-      key: req.params.key, value, updated_at: new Date().toISOString()
-    }, { onConflict: 'key' });
-    if (error) { console.error('[Settings] upsert error:', error.message, 'key:', req.params.key, 'svc_key_set:', !!process.env.SUPABASE_SERVICE_KEY); throw error; }
+    // Try update first, then insert (avoids INSERT policy issues with upsert)
+    const { data: existing } = await sb.from('app_settings').select('key').eq('key', req.params.key).single();
+    let error;
+    if (existing) {
+      ({ error } = await sb.from('app_settings').update({
+        value, updated_at: new Date().toISOString()
+      }).eq('key', req.params.key));
+    } else {
+      ({ error } = await sb.from('app_settings').insert({
+        key: req.params.key, value, updated_at: new Date().toISOString()
+      }));
+    }
+    if (error) { console.error('[Settings] write error:', error.message, 'key:', req.params.key); throw error; }
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -878,12 +898,7 @@ const PORT = process.env.PORT || 4000;
 // ── Startup: disable RLS on app_settings via SQL ──
 (async () => {
   try {
-    // Use rpc to run raw SQL — service key allows this
-    const { error: e1 } = await _supabase.rpc('exec_sql', {
-      sql: 'ALTER TABLE app_settings DISABLE ROW LEVEL SECURITY;'
-    }).catch(() => ({ error: null }));
- 
-    // Fallback: try direct upsert to verify
+    // Verify service key works
     const { error } = await _supabase.from('app_settings').upsert(
       { key: '_startup_test', value: 'ok', updated_at: new Date().toISOString() },
       { onConflict: 'key' }
