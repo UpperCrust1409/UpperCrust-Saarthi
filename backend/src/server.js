@@ -39,18 +39,19 @@ require('@supabase/supabase-js').createClient = function(url, key, opts) {
   return _origCreateClient(url, SUPABASE_SVC_KEY, opts);
 };
  
-// Also inject into every request for routes that use req.supabase
-app.use(function(req, res, next) {
-  req.supabase = _supabase;
-  req.sb = _supabase;
-  next();
-});
  
 // ─────────────────────────────────────────────
 // APP
 // ─────────────────────────────────────────────
 const app = express();
 app.set('trust proxy', 1);
+ 
+// ── Inject service-key supabase into every request (fixes cross-device data loading) ──
+app.use(function(req, res, next) {
+  req.supabase = _supabase;
+  req.sb = _supabase;
+  next();
+});
  
 // ── CORS — locked to your domain only ──
 app.use(cors({
