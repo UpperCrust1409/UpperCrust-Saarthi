@@ -238,11 +238,16 @@ app.use('/api/holdings',  requireAuth, require('./routes/holdings'));
 app.use('/api/meta',      requireAuth, require('./routes/meta'));
  
 // ── LEVEL 1+2: Compute routes (server-side calculations) ──
-const computeRouter = require('./routes/compute');
-app.use('/api/compute', requireAuth, (req, res, next) => {
-  req.supabase = _supabase;
-  next();
-}, computeRouter);
+try {
+  const computeRouter = require('./routes/compute');
+  app.use('/api/compute', requireAuth, (req, res, next) => {
+    req.supabase = _supabase;
+    next();
+  }, computeRouter);
+  console.log('[Compute] Server-side calculation routes registered');
+} catch(e) {
+  console.warn('[Compute] routes/compute.js not found — skipping. Upload and deploy compute.js to enable.');
+}
  
 // FIFO routes
 const registerFIFORoutes = require('./routes/fifo');
