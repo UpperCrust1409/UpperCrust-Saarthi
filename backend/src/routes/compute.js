@@ -5,7 +5,7 @@
  */
 const express = require('express');
 const router = express.Router();
-
+ 
 // ── XIRR (Newton-Raphson) ──
 function _xirr(cashflows, guess) {
   guess = guess || 0.1;
@@ -28,7 +28,7 @@ function _xirr(cashflows, guess) {
   }
   return (guess > -1 && guess < 100) ? guess : null;
 }
-
+ 
 // ── PORTFOLIO HEALTH SCORE (hidden algorithm) ──
 function computeHealthScore(client) {
   const holdings = client.holdings || [];
@@ -58,7 +58,7 @@ function computeHealthScore(client) {
     subScores: scores,
   };
 }
-
+ 
 // ── BREACH DETECTION ──
 function evaluateBreaches(client, filters) {
   const aum = (client.total_current||0) + (client.cash||0);
@@ -90,7 +90,7 @@ function evaluateBreaches(client, filters) {
   }
   return breaches;
 }
-
+ 
 // ── POST /xirr ──
 router.post('/xirr', (req, res) => {
   try {
@@ -101,7 +101,7 @@ router.post('/xirr', (req, res) => {
     res.json({ xirr: result, xirrPct: result !== null ? result*100 : null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── POST /health ──
 router.post('/health', (req, res) => {
   try {
@@ -110,11 +110,11 @@ router.post('/health', (req, res) => {
     res.json(computeHealthScore(client) || { error: 'Cannot compute' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── POST /health/batch ──
 router.post('/health/batch', async (req, res) => {
   try {
-    const sb = req.supabase;
+    const sb = req.supabase || global._supabase;
     const { data: clients } = await sb.from('clients').select('id,name,total_invested,total_current,total_pnl,cash,investment_date');
     const { data: holdings } = await sb.from('holdings').select('client_id,symbol,market_value,asset_class');
     const hMap = {}; for (const h of holdings||[]) { (hMap[h.client_id]=hMap[h.client_id]||[]).push(h); }
@@ -123,13 +123,13 @@ router.post('/health/batch', async (req, res) => {
     res.json({ scores });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── POST /breaches/batch ──
 router.post('/breaches/batch', async (req, res) => {
   try {
     const { filters } = req.body;
     if (!Array.isArray(filters)) return res.status(400).json({ error: 'filters required' });
-    const sb = req.supabase;
+    const sb = req.supabase || global._supabase;
     const { data: clients } = await sb.from('clients').select('id,name,total_current,cash');
     const { data: holdings } = await sb.from('holdings').select('client_id,symbol,market_value,asset_class,sector_tag');
     const hMap = {}; for (const h of holdings||[]) { (hMap[h.client_id]=hMap[h.client_id]||[]).push(h); }
@@ -141,11 +141,11 @@ router.post('/breaches/batch', async (req, res) => {
     res.json({ totalBreaches: Object.values(allBreaches).reduce((s,b)=>s+b.length,0), clientsAffected: Object.keys(allBreaches).length, breaches: allBreaches });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── LEVEL 2: GET /client-index (names + IDs only, no holdings) ──
 router.get('/client-index', async (req, res) => {
   try {
-    const { data, error } = await req.supabase.from('clients')
+    const { data, error } = await req.supabase || global._supabase.from('clients')
       .select('id,name,fund_name,investment_date,total_pnl,total_invested,total_current,cash')
       .order('total_invested', { ascending: false });
     if (error) throw error;
@@ -165,12 +165,12 @@ router.get('/client-index', async (req, res) => {
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 // ── LEVEL 2: GET /client/:name (full detail on-demand) ──
 router.get('/client/:name', async (req, res) => {
   try {
     const name = decodeURIComponent(req.params.name);
-    const sb = req.supabase;
+    const sb = req.supabase || global._supabase;
     const { data: clients } = await sb.from('clients').select('*').eq('name', name).limit(1);
     if (!clients?.length) return res.status(404).json({ error: 'Client not found' });
     const client = clients[0];
@@ -201,5 +201,5 @@ router.get('/client/:name', async (req, res) => {
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+ 
 module.exports = router;
