@@ -336,6 +336,28 @@ app.post('/api/settings/:key', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
+// ── /api/meta/:key — alias for /api/settings/:key (used by saveMeta/loadMeta) ──
+app.get('/api/meta/:key', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await _supabase
+      .from('app_settings').select('value').eq('key', req.params.key).single();
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json({ value: data?.value || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+ 
+app.post('/api/meta/:key', requireAuth, async (req, res) => {
+  try {
+    const { value } = req.body;
+    if (value === undefined) return res.status(400).json({ error: 'Value required' });
+    const { error } = await _supabase.from('app_settings').upsert({
+      key: req.params.key, value, updated_at: new Date().toISOString()
+    });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+ 
 // ─────────────────────────────────────────────
 // SAARTHI MEMORY (protected)
 // ─────────────────────────────────────────────
