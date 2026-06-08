@@ -319,7 +319,7 @@ app.get('/api/settings/:key', requireAuth, async (req, res) => {
     const { data, error } = await _supabase
       .from('app_settings').select('value').eq('key', req.params.key).single();
     if (error && error.code !== 'PGRST116') throw error;
-    res.json({ value: data?.value || null });
+    res.json({ value: data?.value ?? null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
@@ -329,8 +329,8 @@ app.post('/api/settings/:key', requireAuth, async (req, res) => {
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
     const { error } = await _supabase.from('app_settings').upsert({
       key: req.params.key, value, updated_at: new Date().toISOString()
-    });
-    if (error) throw error;
+    }, { onConflict: 'key' });
+    if (error) { console.error('[Settings] upsert error:', error.message, 'key:', req.params.key); throw error; }
     audit(req.user.id, 'SETTINGS_UPDATE', { key: req.params.key });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -342,7 +342,7 @@ app.get('/api/meta/:key', requireAuth, async (req, res) => {
     const { data, error } = await _supabase
       .from('app_settings').select('value').eq('key', req.params.key).single();
     if (error && error.code !== 'PGRST116') throw error;
-    res.json({ value: data?.value || null });
+    res.json({ value: data?.value ?? null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
@@ -352,8 +352,8 @@ app.post('/api/meta/:key', requireAuth, async (req, res) => {
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
     const { error } = await _supabase.from('app_settings').upsert({
       key: req.params.key, value, updated_at: new Date().toISOString()
-    });
-    if (error) throw error;
+    }, { onConflict: 'key' });
+    if (error) { console.error('[Settings] upsert error:', error.message, 'key:', req.params.key); throw error; }
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
