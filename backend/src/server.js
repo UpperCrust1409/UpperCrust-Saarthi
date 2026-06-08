@@ -30,6 +30,22 @@ if (!SUPABASE_URL) throw new Error('SUPABASE_URL env variable is required');
 const _supabase = createClient(SUPABASE_URL, SUPABASE_SVC_KEY);
 global._supabase = _supabase; // accessible to all route files via global._supabase
  
+// ── CRITICAL: Intercept ALL supabase clients in route files ──
+// Route files that call createClient() internally will get the service key client
+// by patching the supabase-js module to always return the service key version
+const _origCreateClient = require('@supabase/supabase-js').createClient;
+require('@supabase/supabase-js').createClient = function(url, key, opts) {
+  // Always use service key regardless of what key the route file passes
+  return _origCreateClient(url, SUPABASE_SVC_KEY, opts);
+};
+ 
+// Also inject into every request for routes that use req.supabase
+app.use(function(req, res, next) {
+  req.supabase = _supabase;
+  req.sb = _supabase;
+  next();
+});
+ 
 // ─────────────────────────────────────────────
 // APP
 // ─────────────────────────────────────────────
