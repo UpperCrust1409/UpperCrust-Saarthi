@@ -28,6 +28,7 @@ if (!JWT_SECRET)   throw new Error('JWT_SECRET env variable is required');
 if (!SUPABASE_URL) throw new Error('SUPABASE_URL env variable is required');
  
 const _supabase = createClient(SUPABASE_URL, SUPABASE_SVC_KEY);
+global._supabase = _supabase; // accessible to all route files via global._supabase
  
 // ─────────────────────────────────────────────
 // APP
@@ -229,13 +230,16 @@ app.use('/api/upload', requireAuth, (req, res, next) => {
   req.supabase = _supabase; // inject service key client
   next();
 }, uploadRouter);
-app.use('/api/clients',   requireAuth, require('./routes/clients'));
-app.use('/api/stocks',    requireAuth, require('./routes/stocks'));
-app.use('/api/dashboard', requireAuth, require('./routes/dashboard'));
-app.use('/api/risk',      requireAuth, require('./routes/risk'));
-app.use('/api/tags',      requireAuth, require('./routes/tags'));
-app.use('/api/holdings',  requireAuth, require('./routes/holdings'));
-app.use('/api/meta',      requireAuth, require('./routes/meta'));
+// Inject service-key supabase into ALL data routes (bypasses RLS for authenticated users)
+function injectSupabase(req, res, next) { req.supabase = _supabase; next(); }
+ 
+app.use('/api/clients',   requireAuth, injectSupabase, require('./routes/clients'));
+app.use('/api/stocks',    requireAuth, injectSupabase, require('./routes/stocks'));
+app.use('/api/dashboard', requireAuth, injectSupabase, require('./routes/dashboard'));
+app.use('/api/risk',      requireAuth, injectSupabase, require('./routes/risk'));
+app.use('/api/tags',      requireAuth, injectSupabase, require('./routes/tags'));
+app.use('/api/holdings',  requireAuth, injectSupabase, require('./routes/holdings'));
+app.use('/api/meta',      requireAuth, injectSupabase, require('./routes/meta'));
  
 // ── LEVEL 1+2: Compute routes (server-side calculations) ──
 try {
