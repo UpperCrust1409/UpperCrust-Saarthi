@@ -275,6 +275,43 @@ const registerFIFORoutes = require('./routes/fifo');
 registerFIFORoutes(app, _supabase, requireAuth);
  
 // ─────────────────────────────────────────────
+// FIFO CACHE SAVE (from client-side parse)
+// ─────────────────────────────────────────────
+app.post('/api/fifo/save-cache', requireAuth, async (req, res) => {
+  try {
+    const { cache, status } = req.body;
+    if (!cache || typeof cache !== 'object') {
+      return res.status(400).json({ error: 'cache required' });
+    }
+    // Save each client's FIFO data to Supabase
+    const clients = Object.entries(cache);
+    let saved = 0;
+    for (const [clientName, data] of clients) {
+      const { error } = await _supabase
+        .from('fifo_lots')
+        .upsert({
+          client_name: clientName,
+          lots: JSON.stringify(data.lots || {}),
+          realized: JSON.stringify(data.realized || []),
+          txn_count: data.txnCount || 0,
+          raw_txns: JSON.stringify(data._rawTxns || []),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'client_name' });
+      if (!error) saved++;
+    }
+    // Save status
+    if (status) {
+      await _supabase.from('app_settings')
+        .upsert({ key: 'fifo_status', value: JSON.stringify(status) }, { onConflict: 'key' });
+    }
+    res.json({ ok: true, saved, total: clients.length });
+  } catch (err) {
+    console.error('[FIFO save-cache]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+ 
+// ─────────────────────────────────────────────
 // APP SETTINGS (protected)
 // ─────────────────────────────────────────────
 app.get('/api/settings/:key', requireAuth, async (req, res) => {
