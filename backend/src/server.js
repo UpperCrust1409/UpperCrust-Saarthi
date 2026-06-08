@@ -18,6 +18,10 @@ const { createClient } = require('@supabase/supabase-js');
 const JWT_SECRET       = process.env.JWT_SECRET;
 const SUPABASE_URL     = process.env.SUPABASE_URL;
 const SUPABASE_SVC_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!process.env.SUPABASE_SERVICE_KEY) {
+  console.error('⚠️  SUPABASE_SERVICE_KEY not set — falling back to anon key. RLS will block writes!');
+  console.error('   Set SUPABASE_SERVICE_KEY in Railway environment variables.');
+}
 const KITE_API_KEY     = process.env.KITE_API_KEY;
 const KITE_API_SECRET  = process.env.KITE_API_SECRET;
 const KITE_BASE        = 'https://api.kite.trade';
@@ -27,7 +31,10 @@ const ANTHROPIC_KEY    = process.env.ANTHROPIC_API_KEY; // ONLY on server — ne
 if (!JWT_SECRET)   throw new Error('JWT_SECRET env variable is required');
 if (!SUPABASE_URL) throw new Error('SUPABASE_URL env variable is required');
  
-const _supabase = createClient(SUPABASE_URL, SUPABASE_SVC_KEY);
+const _supabase = createClient(SUPABASE_URL, SUPABASE_SVC_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+  global: { headers: { 'x-supabase-role': 'service_role' } }
+});
 global._supabase = _supabase; // accessible to all route files via global._supabase
  
 // ── CRITICAL: Intercept ALL supabase clients in route files ──
@@ -327,10 +334,12 @@ app.post('/api/settings/:key', requireAuth, async (req, res) => {
   try {
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
-    const { error } = await _supabase.from('app_settings').upsert({
+    // Use service key client directly to bypass RLS
+    const sb = global._supabase || _supabase;
+    const { error } = await sb.from('app_settings').upsert({
       key: req.params.key, value, updated_at: new Date().toISOString()
     }, { onConflict: 'key' });
-    if (error) { console.error('[Settings] upsert error:', error.message, 'key:', req.params.key); throw error; }
+    if (error) { console.error('[Settings] upsert error:', error.message, 'key:', req.params.key, 'svc_key_set:', !!process.env.SUPABASE_SERVICE_KEY); throw error; }
     audit(req.user.id, 'SETTINGS_UPDATE', { key: req.params.key });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -350,10 +359,12 @@ app.post('/api/meta/:key', requireAuth, async (req, res) => {
   try {
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
-    const { error } = await _supabase.from('app_settings').upsert({
+    // Use service key client directly to bypass RLS
+    const sb = global._supabase || _supabase;
+    const { error } = await sb.from('app_settings').upsert({
       key: req.params.key, value, updated_at: new Date().toISOString()
     }, { onConflict: 'key' });
-    if (error) { console.error('[Settings] upsert error:', error.message, 'key:', req.params.key); throw error; }
+    if (error) { console.error('[Settings] upsert error:', error.message, 'key:', req.params.key, 'svc_key_set:', !!process.env.SUPABASE_SERVICE_KEY); throw error; }
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -863,5 +874,22 @@ app.use((err, req, res, next) => {
 });
  
 const PORT = process.env.PORT || 4000;
+ 
+// ── Startup: verify service key bypasses RLS ──
+(async () => {
+  try {
+    const { data, error } = await _supabase.from('app_settings').upsert(
+      { key: '_startup_test', value: 'ok', updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    if (error) {
+      console.error('CRITICAL: Supabase service key NOT working:', error.message);
+      console.error('→ Go to Railway → Variables → set SUPABASE_SERVICE_KEY = service_role key from Supabase → Project Settings → API → service_role');
+    } else {
+      console.log('✓ Supabase service key OK — RLS bypassed');
+    }
+  } catch(e) { console.error('Supabase startup check failed:', e.message); }
+})();
+ 
 app.listen(PORT, () => console.log(`Saarthi backend secured on :${PORT}`));
 module.exports = app;
