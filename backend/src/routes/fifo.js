@@ -4,7 +4,7 @@
 //
 // npm install multer xlsx
 //
-// Wire: registerFIFORoutes(app, supabase);  // before app.listen()
+// Wire: registerFIFORoutes(app, supabase, requireAuth);  // before app.listen()
 // ══════════════════════════════════════════════════════════════
  
 const multer = require('multer');
@@ -98,10 +98,10 @@ async function getClientFIFO(supabase, clientName) {
   return data;
 }
  
-module.exports = function registerFIFORoutes(app, supabase) {
+module.exports = function registerFIFORoutes(app, supabase, requireAuth, requireRole) {
  
   // POST /api/fifo/upload — master XLS with all client sheets
-  app.post('/api/fifo/upload', upload.single('file'), async (req, res) => {
+  app.post('/api/fifo/upload', requireAuth, requireRole('admin'), upload.single('file'), async (req, res) => {
     try {
       const mode = req.body.mode || 'merge';
       if (!req.file) return res.status(400).json({ error: 'No file' });
@@ -127,7 +127,7 @@ module.exports = function registerFIFORoutes(app, supabase) {
   });
  
   // GET /api/fifo/client?name=...
-  app.get('/api/fifo/client', async (req, res) => {
+  app.get('/api/fifo/client', requireAuth, async (req, res) => {
     try {
       const name = req.query.name;
       if (!name) return res.status(400).json({ error: 'name required' });
@@ -137,7 +137,7 @@ module.exports = function registerFIFORoutes(app, supabase) {
   });
  
   // GET /api/fifo/status
-  app.get('/api/fifo/status', async (req, res) => {
+  app.get('/api/fifo/status', requireAuth, async (req, res) => {
     try {
       const { data: latest } = await supabase.from('client_fifo').select('updated_at')
         .order('updated_at', { ascending: false }).limit(1);
@@ -149,7 +149,7 @@ module.exports = function registerFIFORoutes(app, supabase) {
   });
  
   // GET /api/fifo/all — bulk fetch all clients for frontend cache
-  app.get('/api/fifo/all', async (req, res) => {
+  app.get('/api/fifo/all', requireAuth, async (req, res) => {
     try {
       const { data, error } = await supabase
         .from('client_fifo')
@@ -171,7 +171,7 @@ module.exports = function registerFIFORoutes(app, supabase) {
   });
  
   // GET /api/fifo/tax-preview?client=&isin=&qty=&sellPrice=
-  app.get('/api/fifo/tax-preview', async (req, res) => {
+  app.get('/api/fifo/tax-preview', requireAuth, async (req, res) => {
     try {
       const { client, isin, qty, sellPrice } = req.query;
       if (!client||!isin||!qty||!sellPrice) return res.status(400).json({ error: 'client, isin, qty, sellPrice required' });
