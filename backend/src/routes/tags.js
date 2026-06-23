@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { supabase } = require('../db/supabase');
-
+ 
 // GET /api/tags — all tags
 router.get('/', async (req, res) => {
   try {
@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // POST /api/tags — upsert a single tag
 router.post('/', async (req, res) => {
   try {
@@ -42,7 +42,7 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // DELETE /api/tags/:symbol — reset a tag
 router.delete('/:symbol', async (req, res) => {
   try {
@@ -57,9 +57,12 @@ router.delete('/:symbol', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// POST /api/tags/bulk — save all tags at once
+ 
+// POST /api/tags/bulk — save all tags at once (admin only — overwrites all tag data)
 router.post('/bulk', async (req, res) => {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required.' });
+  }
   try {
     const { tags } = req.body;
     if (!Array.isArray(tags) || !tags.length) return res.status(400).json({ error: 'tags array required' });
@@ -82,5 +85,5 @@ router.post('/bulk', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 module.exports = router;
