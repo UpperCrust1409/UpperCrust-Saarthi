@@ -36,6 +36,9 @@ router.get('/:id', async (req, res) => {
 // POST /clients/net-cash — store Net Investible Surplus per client
 // Body: { netCashMap: { "CLIENT NAME(00012345)": 1481430, ... } }
 router.post('/net-cash', async (req, res) => {
+  if (!['admin', 'manager'].includes(req.user?.role)) {
+    return res.status(403).json({ error: 'Admin or manager access required.' });
+  }
   try {
     const { netCashMap } = req.body;
     if (!netCashMap || typeof netCashMap !== 'object') {
