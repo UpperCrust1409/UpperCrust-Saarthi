@@ -250,7 +250,7 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 // Pass service-key supabase to upload route so it bypasses RLS
 const uploadRouter = require('./routes/upload');
 uploadRouter._supabase = null; // will be set below after _supabase is created
-app.use('/api/upload', requireAuth, (req, res, next) => {
+app.use('/api/upload', requireAuth, requireRole('admin'), (req, res, next) => {
   req.supabase = _supabase; // inject service key client
   next();
 }, uploadRouter);
@@ -263,7 +263,7 @@ app.use('/api/dashboard', requireAuth, injectSupabase, require('./routes/dashboa
 app.use('/api/risk',      requireAuth, injectSupabase, require('./routes/risk'));
 app.use('/api/tags',      requireAuth, injectSupabase, require('./routes/tags'));
 app.use('/api/holdings',  requireAuth, injectSupabase, require('./routes/holdings'));
-app.use('/api/meta',      requireAuth, injectSupabase, require('./routes/meta'));
+// /api/meta/:key is handled by inline routes below (app_settings table)
  
 // ── LEVEL 1+2: Compute routes (server-side calculations) ──
 try {
@@ -279,7 +279,7 @@ try {
  
 // FIFO routes
 const registerFIFORoutes = require('./routes/fifo');
-registerFIFORoutes(app, _supabase, requireAuth);
+registerFIFORoutes(app, _supabase, requireAuth, requireRole);
  
 // ─────────────────────────────────────────────
 // FIFO CACHE SAVE (from client-side parse)
@@ -330,7 +330,21 @@ app.get('/api/settings/:key', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
+// ── Keys that require admin role to write ──
+// nav_cashflows: XIRR source of truth | corp_actions: affects FIFO cost basis
+// insider_map: trading restriction compliance | screener_data: signal engine input
+// n500_data / gsec_data: regime engine inputs | upload_meta: upload audit trail
+const _ADMIN_ONLY_SETTINGS = new Set([
+  'nav_cashflows', 'corp_actions', 'insider_map',
+  'screener_data', 'n500_data', 'gsec_data', 'upload_meta',
+]);
+ 
 app.post('/api/settings/:key', requireAuth, async (req, res) => {
+  // Compliance-critical keys: admin only. Collaborative keys (family_groups,
+  // exceptional_clients, regime_cache, trade_history): any authenticated user.
+  if (_ADMIN_ONLY_SETTINGS.has(req.params.key) && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required to write this setting.' });
+  }
   try {
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
@@ -421,9 +435,13 @@ app.post('/api/memory', requireAuth, async (req, res) => {
  
 app.delete('/api/memory/:id', requireAuth, async (req, res) => {
   try {
-    const { error } = await _supabase.from('saarthi_memory')
+    // Admins can delete any memory; others can only delete their own.
+    const filter = _supabase.from('saarthi_memory')
       .update({ active: false, updated_at: new Date().toISOString() })
       .eq('id', req.params.id);
+    const { error } = req.user.role === 'admin'
+      ? await filter
+      : await filter.eq('created_by', req.user.email);
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -436,7 +454,11 @@ app.patch('/api/memory/:id', requireAuth, async (req, res) => {
     if (importance !== undefined) updates.importance = importance;
     if (memory     !== undefined) updates.memory = memory;
     if (active     !== undefined) updates.active = active;
-    const { error } = await _supabase.from('saarthi_memory').update(updates).eq('id', req.params.id);
+    // Admins can patch any memory; others can only patch their own.
+    const filter = _supabase.from('saarthi_memory').update(updates).eq('id', req.params.id);
+    const { error } = req.user.role === 'admin'
+      ? await filter
+      : await filter.eq('created_by', req.user.email);
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -916,3 +938,4 @@ const PORT = process.env.PORT || 4000;
  
 app.listen(PORT, () => console.log(`Saarthi backend secured on :${PORT}`));
 module.exports = app;
+ 
