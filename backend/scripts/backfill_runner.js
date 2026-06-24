@@ -15,8 +15,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 );
  
-const { calcAllPlanetsForDate, detectEvents } = require('./src/services/ephemerisService');
-const { computeScores } = require('./src/services/astroScoreService');
+const { calcAllPlanetsForDate, detectEvents } = require('../src/services/ephemerisService');
+const { computeScores } = require('../src/services/astroScoreService');
  
 async function main() {
   const FROM = process.argv[2] || '2005-01-01';
