@@ -31,9 +31,11 @@ const ANTHROPIC_KEY    = process.env.ANTHROPIC_API_KEY; // ONLY on server — ne
 if (!JWT_SECRET)   throw new Error('JWT_SECRET env variable is required');
 if (!SUPABASE_URL) throw new Error('SUPABASE_URL env variable is required');
  
+const ws = require('ws');
 const _supabase = createClient(SUPABASE_URL, SUPABASE_SVC_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
-  global: { headers: { 'x-supabase-role': 'service_role' } }
+  global: { headers: { 'x-supabase-role': 'service_role' } },
+  realtime: { transport: ws }
 });
 global._supabase = _supabase;
  
