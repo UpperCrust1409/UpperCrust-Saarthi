@@ -175,7 +175,13 @@ async function runBacktest({ event_type, instrument, window_days = 30, date_from
   };
 
   // Persist to cache
-  await supabase.from('astro_backtests').upsert([result], { onConflict: 'event_type,instrument,window_days' });
+  // Delete existing + insert fresh (no unique constraint needed)
+  await supabase.from('astro_backtests')
+    .delete()
+    .eq('event_type', event_type)
+    .eq('instrument', instrument)
+    .eq('window_days', window_days);
+  await supabase.from('astro_backtests').insert([result]);
 
   return formatResult(result);
 }
