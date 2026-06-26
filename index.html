@@ -33444,14 +33444,23 @@ async function aqRunFrontTest() {
       <!-- Summary cards for event types with data -->
       ${Object.keys(backtests).length?`
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:16px">
-          ${Object.entries(backtests).map(([et,bt])=>`
-            <div class="kc" style="text-align:center">
-              <div class="kc-lbl" style="font-size:9px">${et.replace(/_/g,' ')}</div>
-              <div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:${bt.avg_return_pct>=0?'var(--green)':'var(--red)'};margin:4px 0">
-                ${bt.avg_return_pct>=0?'+':''}${bt.avg_return_pct?.toFixed(2)}%
+          ${Object.entries(backtests).map(([et,bt])=>{
+            const r=bt.avg_return_pct, wr=bt.win_rate_pct;
+            let sig,sc;
+            if(r>3&&wr>62){sig='🟢 BUY';sc='var(--green)';}
+            else if(r>1&&wr>55){sig='🔵 Accumulate';sc='#2060c0';}
+            else if(r>0&&wr>=50){sig='🟡 Hold +';sc='var(--amber)';}
+            else if(r<0&&r>-1.5&&wr>=45){sig='🟠 Reduce';sc:'#c06020';}
+            else if(r<=-1.5||wr<42){sig='🔴 SELL';sc='var(--red)';}
+            else{sig='⚪ Neutral';sc='var(--ink3)';}
+            return `<div class="kc" style="text-align:center">
+              <div class="kc-lbl" style="font-size:9px">${et.replace(/CONJUNCTION_/,'').replace(/RETROGRADE_END_/,'D ').replace(/_/g,' ')}</div>
+              <div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:${r>=0?'var(--green)':'var(--red)'};margin:4px 0">
+                ${r>=0?'+':''}${r?.toFixed(2)}%
               </div>
-              <div style="font-size:9px;color:var(--ink4)">${bt.win_rate_pct?.toFixed(0)}% win · ${bt.n_observations} obs</div>
-            </div>`).join('')}
+              <div style="font-size:9px;color:var(--ink4);margin-bottom:4px">${wr?.toFixed(0)}% win · ${bt.n_observations} obs</div>
+              <div style="font-size:10px;font-weight:700;color:${sc}">${sig}</div>
+            </div>`;}).join('')}
         </div>`:''}
 
       <!-- Upcoming events with forecast -->
@@ -33471,7 +33480,15 @@ async function aqRunFrontTest() {
               const hasData=bt&&bt.n_observations>2;
               const ret=bt?.avg_return_pct;
               const wr=bt?.win_rate_pct;
-              const signal=!hasData?'—':ret>2&&wr>60?'🟢 Bullish':ret<-2&&wr<40?'🔴 Bearish':ret>0?'🟡 Mild +':'🟡 Mild −';
+              let signal='—';
+              if(hasData){
+                if(ret>3&&wr>62) signal='🟢 BUY';
+                else if(ret>1&&wr>55) signal='🔵 Accumulate';
+                else if(ret>0&&wr>=50) signal='🟡 Hold +';
+                else if(ret<0&&ret>-1.5&&wr>=45) signal='🟠 Reduce';
+                else if(ret<=-1.5||wr<42) signal='🔴 SELL';
+                else signal='⚪ Neutral';
+              }
               return `<tr>
                 <td style="font-family:var(--font-mono);font-size:11px">${ev.event_date}</td>
                 <td style="font-size:11px">${ev.description||ev.event_type?.replace(/_/g,' ')}</td>
