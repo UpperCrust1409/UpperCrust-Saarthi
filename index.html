@@ -33300,7 +33300,7 @@ function aqRenderBtResults(el,d) {
       ].map(k=>`<div class="kc" style="text-align:center"><div class="kc-lbl">${k.label}</div><div style="font-family:var(--font-mono);font-size:17px;font-weight:700;color:${k.c};margin-top:4px">${k.val}</div></div>`).join('')}
     </div>
     <div style="margin-bottom:10px;padding:10px 14px;background:var(--sur3);border-radius:var(--r);font-size:11px;color:var(--ink3)">
-      <b style="color:var(--ink)">${event_type?.replace(/_/g,' ')} × ${instrument}</b> — ${n_observations} observations · ${d.window_days}-day holding window · ${date_from||d.date_from} to ${date_to||d.date_to}
+      <b style="color:var(--ink)">${event_type?.replace(/_/g,' ')} × ${instrument}</b> — ${n_observations} observations · ${d.window_days}-day holding window · ${d.date_from||''} to ${d.date_to||''}
     </div>
     <div class="panel" style="margin-bottom:14px">
       <div style="font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:10px;text-transform:uppercase;letter-spacing:.8px">Return per Observation</div>
