@@ -209,4 +209,37 @@ router.post('/admin/backfill', requireAuth, async (req, res) => {
   });
 });
 
+
+// ── Bulk backtest cache fetch (for Signal Hub / Front-Test) ──────
+router.get('/backtests/bulk', async (req, res) => {
+  try {
+    const { instrument, window_days = 30 } = req.query;
+    const supabase = req.supabase;
+    let query = supabase
+      .from('astro_backtests')
+      .select('event_type, instrument, window_days, n_observations, avg_return_pct, win_rate_pct, cagr_pct, sharpe_ratio, date_from, date_to')
+      .eq('window_days', parseInt(window_days))
+      .gt('n_observations', 3);
+    if (instrument) query = query.eq('instrument', instrument);
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ backtests: data || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/backtests/bulk-all', async (req, res) => {
+  try {
+    const { window_days = 30 } = req.query;
+    const supabase = req.supabase;
+    const { data, error } = await supabase
+      .from('astro_backtests')
+      .select('event_type, instrument, window_days, n_observations, avg_return_pct, win_rate_pct, cagr_pct, sharpe_ratio, date_from, date_to')
+      .eq('window_days', parseInt(window_days))
+      .gt('n_observations', 3)
+      .order('avg_return_pct', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ backtests: data || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
