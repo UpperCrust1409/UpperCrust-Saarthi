@@ -33110,7 +33110,7 @@ function eventIcon(type) {
 // ═══ MAIN RENDER ═══════════════════════════════════════════════════
 async function renderAstroQuant(el) {
   el.innerHTML = `
-    <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <div style="margin-bottom:16px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow-x:auto;padding-bottom:4px">
       ${AQ_TABS.map(t=>`<button onclick="aqSetTab('${t.id}')" id="aqt-${t.id}"
         style="padding:6px 14px;border-radius:20px;border:1.5px solid ${AQ.tab===t.id?'var(--gold)':'var(--bdr)'};
         background:${AQ.tab===t.id?'var(--glt)':'var(--sur)'};color:${AQ.tab===t.id?'var(--gold3)':'var(--ink3)'};
@@ -33156,7 +33156,7 @@ async function aqRenderDashboard(el) {
   const {planets=[],regime={},upcomingEvents=[],date}=await r.json();
   const rc={BULLISH_ASTRO:'var(--green)',BEARISH_ASTRO:'var(--red)',VOLATILE:'var(--amber)',NEUTRAL:'var(--ink3)'}[regime.regime_label]||'var(--ink3)';
   el.innerHTML=`
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px">
       ${[{label:'Risk Appetite',val:regime.risk_appetite,color:'gold'},{label:'Volatility',val:regime.volatility_score,color:'red'},{label:'Liquidity',val:regime.liquidity_score,color:'grn'},{label:'Sentiment',val:regime.sentiment_score,color:'gold'}].map(k=>`
         <div class="kc ${k.color}" style="text-align:center">
           <div class="kc-lbl">${k.label}</div>
@@ -33167,7 +33167,7 @@ async function aqRenderDashboard(el) {
           <div class="kc-sub" style="margin-top:4px;font-weight:700;color:${rc}">${regime.regime_label?.replace(/_/g,' ')||'—'}</div>
         </div>`).join('')}
     </div>
-    <div style="display:grid;grid-template-columns:1fr 340px;gap:14px">
+    <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:14px">@MEDIA_DESKTOP_340
       <div class="tbl">
         <div class="tbl-hd"><span class="tbl-ht">🪐 Planet Positions — ${date}</span></div>
         <table><thead><tr><th>Planet</th><th>Sign</th><th>Nakshatra</th><th style="text-align:right">Strength</th><th>Status</th></tr></thead>
@@ -33237,7 +33237,7 @@ async function aqRenderSignalHub(el) {
   el.innerHTML=`<div style="padding:40px;text-align:center"><div class="spin"></div><div style="margin-top:10px;font-size:11px;color:var(--ink4)">Loading signal data…</div></div>`;
   try {
     const today=new Date();
-    const future=new Date(today); future.setMonth(future.getMonth()+3);
+    const future=new Date(today); future.setMonth(future.getMonth()+12);
     const todayStr=today.toISOString().split('T')[0];
     const futureStr=future.toISOString().split('T')[0];
 
@@ -33340,7 +33340,7 @@ async function aqRenderSignalHub(el) {
       <div style="margin-bottom:12px;padding:10px 14px;background:var(--amb2);border:1px solid var(--ambbdr);border-radius:var(--r);font-size:10px;color:var(--ink3)">
         ⚠️ <b>Research only.</b> Historical patterns ≠ future results. Combine with fundamental + technical analysis.
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:14px">
         <div class="tbl">
           <div class="tbl-hd" style="background:var(--grn2)"><span class="tbl-ht" style="color:var(--green)">🟢 Top Opportunities — Next 3 Months</span></div>
           <table><thead><tr><th>Instrument</th><th>Event</th><th>Next Date</th><th>Hist. Avg</th><th>Win Rate</th><th>Signal</th></tr></thead>
@@ -33371,7 +33371,7 @@ async function aqRenderSignalHub(el) {
 // ═══ TAB 3 — BACKTEST LAB ══════════════════════════════════════════
 async function aqRenderBacktest(el) {
   el.innerHTML=`
-    <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start">
+    <div style="display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);gap:16px;align-items:start;flex-wrap:wrap">
       <div class="panel" style="position:sticky;top:0">
         <div style="font-size:11px;font-weight:700;color:var(--ink);margin-bottom:16px">⧫ BACKTEST CONFIGURATION</div>
         <div style="margin-bottom:12px">
@@ -33468,7 +33468,7 @@ function aqRenderBtResults(el,d) {
 // ═══ TAB 4 — FRONT-TEST ════════════════════════════════════════════
 async function aqRenderFrontTest(el) {
   el.innerHTML=`
-    <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start">
+    <div style="display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);gap:16px;align-items:start;flex-wrap:wrap">
       <div class="panel" style="position:sticky;top:0">
         <div style="font-size:11px;font-weight:700;color:var(--ink);margin-bottom:4px">🔮 FRONT-TEST</div>
         <div style="font-size:10px;color:var(--ink4);margin-bottom:16px">Apply historical backtest patterns to upcoming astro events</div>
@@ -33707,7 +33707,7 @@ async function aqRenderCalendar(el) {
   }
 
   el.innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 240px;gap:16px">
+    <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:16px">@CAL_SIDEBAR
       <div>
         ${Object.entries(byMonth).slice(0,4).map(([month,evs])=>`
           <div class="panel" style="margin-bottom:12px">
