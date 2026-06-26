@@ -33268,30 +33268,29 @@ async function aqRenderSignalHub(el) {
     // Get all unique backtest keys from upcoming events
     const btKeys=[...new Set(filteredEvents.map(evToKey))];
 
-    // Fetch all backtests for all instruments
+    // Fetch all backtests in parallel (batches of 10)
     const results=[];
-    for(const inst of ALL_INST){
-      for(const key of btKeys){
-        try{
-          const r=await aqFetch('/api/astro/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({event_type:key,instrument:inst.val,window_days:30,date_from:'2005-01-01',date_to:today.toISOString().split('T')[0]})});
-          const bt=await r.json();
-          if(!bt.error&&bt.n_observations>5){
-            // Find next occurrence of this event
-            const nextEv=filteredEvents.find(ev=>evToKey(ev)===key);
-            const score=(bt.avg_return_pct||0)*(bt.win_rate_pct||50)/100;
-            results.push({
-              instrument:inst.label, instVal:inst.val,
-              event:key.replace(/_/g,' '),
-              next_date:nextEv?.event_date||'—',
-              avg_return:bt.avg_return_pct,
-              win_rate:bt.win_rate_pct,
-              n_obs:bt.n_observations,
-              score,
-            });
-          }
-        }catch(e){}
-      }
+    const todayStr=today.toISOString().split('T')[0];
+    const pairs=[];
+    for(const inst of ALL_INST) for(const key of btKeys) pairs.push({inst,key});
+
+    // Process in batches of 10 parallel requests
+    for(let i=0;i<pairs.length;i+=10){
+      const batch=pairs.slice(i,i+10);
+      const batchResults=await Promise.allSettled(batch.map(async({inst,key})=>{
+        const r=await aqFetch('/api/astro/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({event_type:key,instrument:inst.val,window_days:30,date_from:'2005-01-01',date_to:todayStr})});
+        const bt=await r.json();
+        if(!bt.error&&bt.n_observations>5){
+          const nextEv=filteredEvents.find(ev=>evToKey(ev)===key);
+          const score=(bt.avg_return_pct||0)*(bt.win_rate_pct||50)/100;
+          return {instrument:inst.label,instVal:inst.val,event:key.replace(/_/g,' '),
+            next_date:nextEv?.event_date||'—',avg_return:bt.avg_return_pct,
+            win_rate:bt.win_rate_pct,n_obs:bt.n_observations,score};
+        }
+        return null;
+      }));
+      batchResults.forEach(r=>{if(r.status==='fulfilled'&&r.value)results.push(r.value);});
     }
 
     // Sort by score
