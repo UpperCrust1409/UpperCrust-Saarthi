@@ -32987,6 +32987,7 @@ const AQ = { tab: 'dashboard', btResult: null, aiHistory: [], loaded: {} };
 const AQ_TABS = [
   { id: 'dashboard', label: '◉ Dashboard' },
   { id: 'sectors',   label: '⬡ Sectors' },
+  { id: 'summary',   label: '🎯 Signal Hub' },
   { id: 'backtest',  label: '⧫ Backtest Lab' },
   { id: 'fronttest', label: '🔮 Front-Test' },
   { id: 'calendar',  label: '📅 Calendar' },
@@ -33077,24 +33078,26 @@ function aqMd(text) {
 // Planet → sector/commodity impact mapping
 function aqEventImpact(ev) {
   const PLANET_SECTORS = {
-    Jupiter:  {pos:['Banking','Financial Services'],  comm:['Gold']},
-    Saturn:   {pos:['Metals','Mining','Chemicals'],    comm:['Silver','Aluminium','Nickel']},
-    Mars:     {pos:['Defence','Capital Goods','Auto'], comm:['Crude Oil','Copper']},
-    Mercury:  {pos:['IT','Telecom','Auto'],             comm:['Natural Gas']},
-    Venus:    {pos:['FMCG','Consumer Durables'],        comm:['Silver','Palladium','Platinum']},
-    Sun:      {pos:['Power','Capital Goods'],           comm:['Gold']},
-    Moon:     {pos:['Pharma'],                          comm:['Silver']},
-    Rahu:     {pos:[],                                  comm:['Gold','Crude Oil']},
-    Ketu:     {pos:[],                                  comm:['Gold']},
+    Jupiter:  {pos:['Banking','Financial Services','FMCG'], comm:['Gold','Natural Gas']},
+    Saturn:   {pos:['Metals','Mining','Chemicals','Real Estate'], comm:['Silver','Aluminium','Nickel','Crude Oil']},
+    Mars:     {pos:['Defence','Capital Goods','Auto','Metals'], comm:['Crude Oil','Copper','Iron']},
+    Mercury:  {pos:['IT','Telecom','Auto','Chemicals'], comm:['Natural Gas','Copper']},
+    Venus:    {pos:['FMCG','Consumer Durables','Pharma'], comm:['Silver','Platinum','Palladium']},
+    Sun:      {pos:['Power','Capital Goods','Banking'], comm:['Gold','Crude Oil']},
+    Rahu:     {pos:['IT','Pharma'],                     comm:['Gold','Crude Oil','Natural Gas']},
+    Ketu:     {pos:['Pharma','Chemicals'],               comm:['Gold','Silver']},
   };
   const planet = ev.planet;
+  // Skip Moon — too frequent, low signal value
+  if (planet === 'Moon' || planet === 'Moon + Mercury' || ev.planet2 === 'Moon') return '';
   const info = PLANET_SECTORS[planet];
   if (!info) return '';
   const isRetro = ev.event_type === 'RETROGRADE_START';
+  const isConjunction = ev.event_type === 'CONJUNCTION';
   const sectors = info.pos.slice(0,2).join(', ');
   const comms = info.comm.slice(0,2).join(', ');
   const color = isRetro ? 'var(--red)' : 'var(--green)';
-  const sign = isRetro ? '↓ Caution' : '↑ Watch';
+  const sign = isRetro ? '↓ Caution' : isConjunction ? '⚡ Watch' : '↑ Watch';
   if (!sectors && !comms) return '';
   return `<span style="color:${color};font-weight:600">${sign}:</span> ${[sectors, comms].filter(Boolean).join(' · ')}`;
 }
@@ -33136,6 +33139,7 @@ async function aqRenderTab(el) {
   try {
     if(AQ.tab==='dashboard') await aqRenderDashboard(el);
     else if(AQ.tab==='sectors')   await aqRenderSectors(el);
+    else if(AQ.tab==='summary')   await aqRenderSignalHub(el);
     else if(AQ.tab==='backtest')  await aqRenderBacktest(el);
     else if(AQ.tab==='fronttest') await aqRenderFrontTest(el);
     else if(AQ.tab==='calendar')  await aqRenderCalendar(el);
@@ -33225,6 +33229,140 @@ async function aqRenderSectors(el) {
         <td>${aqConfBadge(s.confidence)}</td>
       </tr>`).join('')}</tbody></table>
     </div>`;
+}
+
+
+// ═══ SIGNAL HUB ════════════════════════════════════════════════════
+async function aqRenderSignalHub(el) {
+  el.innerHTML=`<div style="padding:40px;text-align:center"><div class="spin"></div><div style="margin-top:10px;font-size:11px;color:var(--ink4)">Computing signals across all instruments…</div></div>`;
+
+  const today = new Date();
+  const future = new Date(today); future.setMonth(future.getMonth()+3);
+
+  try {
+    // Fetch upcoming events
+    const {events=[]} = await (await aqFetch(`/api/astro/events?from=${today.toISOString().split('T')[0]}&to=${future.toISOString().split('T')[0]}`)).json();
+    const filteredEvents = events.filter(ev=>ev.planet!=='Moon'&&ev.planet2!=='Moon');
+
+    const ALL_INST = [
+      {val:'NIFTY50',label:'Nifty 50'},{val:'NIFTY_BANK',label:'Nifty Bank'},
+      {val:'NIFTY_IT',label:'Nifty IT'},{val:'NIFTY_PHARMA',label:'Nifty Pharma'},
+      {val:'NIFTY_AUTO',label:'Nifty Auto'},{val:'NIFTY_FMCG',label:'Nifty FMCG'},
+      {val:'NIFTY_METAL',label:'Nifty Metal'},{val:'NIFTY_DEFENCE',label:'Nifty Defence'},
+      {val:'NIFTY_ENERGY',label:'Nifty Energy'},
+      {val:'GOLD',label:'Gold'},{val:'SILVER',label:'Silver'},
+      {val:'CRUDE_OIL',label:'Crude Oil'},{val:'COPPER',label:'Copper'},
+      {val:'NATURAL_GAS',label:'Natural Gas'},{val:'PLATINUM',label:'Platinum'},
+    ];
+
+    // Score function
+    function evToKey(ev){
+      const et=ev.event_type,pl=ev.planet,pl2=ev.planet2;
+      if(et==='RETROGRADE_START') return pl+'_RETROGRADE';
+      if(et==='RETROGRADE_END') return 'RETROGRADE_END_'+pl;
+      if(et==='SIGN_CHANGE') return pl+'_SIGN_CHANGE';
+      if(et==='CONJUNCTION'){const pair=[pl,pl2].filter(Boolean).sort().join('_');return 'CONJUNCTION_'+pair;}
+      return et;
+    }
+
+    // Get all unique backtest keys from upcoming events
+    const btKeys=[...new Set(filteredEvents.map(evToKey))];
+
+    // Fetch all backtests for all instruments
+    const results=[];
+    for(const inst of ALL_INST){
+      for(const key of btKeys){
+        try{
+          const r=await aqFetch('/api/astro/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({event_type:key,instrument:inst.val,window_days:30,date_from:'2005-01-01',date_to:today.toISOString().split('T')[0]})});
+          const bt=await r.json();
+          if(!bt.error&&bt.n_observations>5){
+            // Find next occurrence of this event
+            const nextEv=filteredEvents.find(ev=>evToKey(ev)===key);
+            const score=(bt.avg_return_pct||0)*(bt.win_rate_pct||50)/100;
+            results.push({
+              instrument:inst.label, instVal:inst.val,
+              event:key.replace(/_/g,' '),
+              next_date:nextEv?.event_date||'—',
+              avg_return:bt.avg_return_pct,
+              win_rate:bt.win_rate_pct,
+              n_obs:bt.n_observations,
+              score,
+            });
+          }
+        }catch(e){}
+      }
+    }
+
+    // Sort by score
+    results.sort((a,b)=>b.score-a.score);
+    const buys=results.filter(r=>r.avg_return>0).slice(0,8);
+    const sells=results.filter(r=>r.avg_return<0).sort((a,b)=>a.score-b.score).slice(0,8);
+
+    function signalBadge(r){
+      if(r.avg_return>3&&r.win_rate>62) return {label:'🟢 BUY',c:'var(--green)'};
+      if(r.avg_return>1.5&&r.win_rate>55) return {label:'🔵 Accumulate',c:'#2060c0'};
+      if(r.avg_return>0) return {label:'🟡 Hold +',c:'var(--amber)'};
+      if(r.avg_return>-1.5) return {label:'🟠 Reduce',c:'#c06020'};
+      return {label:'🔴 SELL/Avoid',c:'var(--red)'};
+    }
+
+    function mkRow(r){
+      const sig=signalBadge(r);
+      return `<tr>
+        <td style="font-weight:600;font-size:12px">${r.instrument}</td>
+        <td style="font-size:11px;color:var(--ink3)">${r.event}</td>
+        <td style="font-family:var(--font-mono);font-size:11px">${r.next_date}</td>
+        <td style="font-family:var(--font-mono);font-weight:700;color:${r.avg_return>=0?'var(--green)':'var(--red)'}">${r.avg_return>=0?'+':''}${r.avg_return?.toFixed(2)}%</td>
+        <td style="font-size:11px;color:var(--ink3)">${r.win_rate?.toFixed(0)}% (${r.n_obs})</td>
+        <td style="font-weight:700;color:${sig.c}">${sig.label}</td>
+      </tr>`;
+    }
+
+    el.innerHTML=`
+      <div style="margin-bottom:16px;padding:12px 16px;background:var(--amb2);border:1px solid var(--ambbdr);border-radius:var(--r);font-size:11px;color:var(--ink3)">
+        ⚠️ <b>Research tool only.</b> Signals based on historical averages of planetary cycles × market returns. Not investment advice. Always combine with fundamental and technical analysis.
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <!-- BUY/Accumulate signals -->
+        <div class="tbl">
+          <div class="tbl-hd" style="background:var(--grn2)"><span class="tbl-ht" style="color:var(--green)">🟢 Top Opportunities — Next 3 Months</span></div>
+          <table>
+            <thead><tr><th>Instrument</th><th>Trigger Event</th><th>Next Date</th><th>Hist. Return</th><th>Win Rate</th><th>Signal</th></tr></thead>
+            <tbody>${buys.map(mkRow).join('')}</tbody>
+          </table>
+        </div>
+
+        <!-- SELL/Avoid signals -->
+        <div class="tbl">
+          <div class="tbl-hd" style="background:var(--red2)"><span class="tbl-ht" style="color:var(--red)">🔴 Caution Zones — Next 3 Months</span></div>
+          <table>
+            <thead><tr><th>Instrument</th><th>Trigger Event</th><th>Next Date</th><th>Hist. Return</th><th>Win Rate</th><th>Signal</th></tr></thead>
+            <tbody>${sells.map(mkRow).join('')}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="margin-top:16px" class="tbl">
+        <div class="tbl-hd"><span class="tbl-ht">📊 All Signals — Ranked by Conviction Score</span>
+          <span style="font-size:10px;color:var(--ink4)">Score = Avg Return × Win Rate</span>
+        </div>
+        <table>
+          <thead><tr><th>Rank</th><th>Instrument</th><th>Event</th><th>Next Date</th><th>Hist. Return</th><th>Win Rate (N)</th><th>Signal</th></tr></thead>
+          <tbody>${results.slice(0,30).map((r,i)=>{const sig=signalBadge(r);return `<tr>
+            <td style="font-family:var(--font-mono);color:var(--ink4)">#${i+1}</td>
+            <td style="font-weight:600;font-size:12px">${r.instrument}</td>
+            <td style="font-size:11px;color:var(--ink3)">${r.event}</td>
+            <td style="font-family:var(--font-mono);font-size:11px">${r.next_date}</td>
+            <td style="font-family:var(--font-mono);font-weight:700;color:${r.avg_return>=0?'var(--green)':'var(--red)'}">${r.avg_return>=0?'+':''}${r.avg_return?.toFixed(2)}%</td>
+            <td style="font-size:11px;color:var(--ink3)">${r.win_rate?.toFixed(0)}% (${r.n_obs})</td>
+            <td style="font-weight:700;color:${sig.c};font-size:11px">${sig.label}</td>
+          </tr>`;}).join('')}</tbody>
+        </table>
+      </div>`;
+
+  } catch(e){el.innerHTML=`<div class="panel" style="color:var(--red)">Error: ${e.message}</div>`;}
 }
 
 // ═══ TAB 3 — BACKTEST LAB ══════════════════════════════════════════
