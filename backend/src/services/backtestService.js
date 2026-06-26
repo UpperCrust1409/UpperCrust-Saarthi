@@ -79,10 +79,19 @@ async function runBacktest({ event_type, instrument, window_days = 30, date_from
   } else if (event_type === 'SIGN_CHANGE') {
     eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').in('planet', ['Jupiter','Saturn','Rahu','Mars']);
   } else if (event_type.startsWith('CONJUNCTION_')) {
-    // Planet-pair specific conjunction e.g. CONJUNCTION_Jupiter_Sun
-    const planets = event_type.replace('CONJUNCTION_', '').split('_');
+    // Planet-pair specific conjunction e.g. CONJUNCTION_JUPITER_SUN
+    const toTitle = s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+    const raw = event_type.replace('CONJUNCTION_', '');
+    // Handle 2-word planet names like NATURAL_GAS — use known planet list
+    const PLANETS = ['JUPITER','SATURN','MARS','MERCURY','VENUS','SUN','MOON','RAHU','KETU'];
+    let p1='', p2='';
+    for(const p of PLANETS) {
+      if(raw.startsWith(p+'_')) { p1=p; p2=raw.slice(p.length+1); break; }
+    }
+    if(!p1) { const parts=raw.split('_'); p1=parts[0]; p2=parts.slice(1).join('_'); }
+    const planet1=toTitle(p1), planet2=toTitle(p2);
     eventsQuery = eventsQuery.eq('event_type', 'CONJUNCTION')
-      .or(`and(planet.eq.${planets[0]},planet2.eq.${planets[1]}),and(planet.eq.${planets[1]},planet2.eq.${planets[0]})`);
+      .or(`and(planet.eq.${planet1},planet2.eq.${planet2}),and(planet.eq.${planet2},planet2.eq.${planet1})`);
   } else {
     eventsQuery = eventsQuery.eq('event_type', event_type);
   }
