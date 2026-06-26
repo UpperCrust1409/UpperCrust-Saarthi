@@ -33271,17 +33271,17 @@ async function aqRenderSignalHub(el) {
       NATURAL_GAS:'Natural Gas',PLATINUM:'Platinum',PALLADIUM:'Palladium',
     };
 
-    // Include both exact key matches AND base event type matches
-    // e.g. upcoming has CONJUNCTION_Jupiter_Sun, backtest has CONJUNCTION_Jupiter_Sun
-    // Also include SIGN_CHANGE and RETROGRADE events that match upcoming
+    // Show all cached backtests — filter to relevant ones based on upcoming event base types
     const baseUpcomingTypes = new Set([...filteredEvents.map(ev=>ev.event_type)]);
+    // Always include sign changes and retrogrades if any upcoming events exist
+    const hasUpcoming = filteredEvents.length > 0;
     const relevant = backtests.filter(bt=>{
-      // Direct key match (conjunction pair specific)
+      if(!hasUpcoming) return true;
       if(upcomingKeys.has(bt.event_type)) return true;
-      // Base event type match (SIGN_CHANGE, RETROGRADE_START etc.)
-      if(baseUpcomingTypes.has('SIGN_CHANGE') && bt.event_type.endsWith('_SIGN_CHANGE')) return true;
-      if(baseUpcomingTypes.has('RETROGRADE_START') && bt.event_type.endsWith('_RETROGRADE')) return true;
-      if(baseUpcomingTypes.has('RETROGRADE_END') && bt.event_type.startsWith('RETROGRADE_END_')) return true;
+      if(bt.event_type.endsWith('_SIGN_CHANGE')) return true;
+      if(bt.event_type.endsWith('_RETROGRADE')) return true;
+      if(bt.event_type.startsWith('RETROGRADE_END_')) return true;
+      if(bt.event_type.startsWith('CONJUNCTION_')) return true;
       return false;
     });
 
