@@ -214,7 +214,7 @@ router.post('/admin/backfill', requireAuth, async (req, res) => {
 router.get('/backtests/bulk', async (req, res) => {
   try {
     const { instrument, window_days = 30 } = req.query;
-    const supabase = req.supabase;
+    const { supabase } = require('../db/supabase');
     let query = supabase
       .from('astro_backtests')
       .select('event_type, instrument, window_days, n_observations, avg_return_pct, win_rate_pct, cagr_pct, sharpe_ratio, date_from, date_to')
@@ -230,7 +230,7 @@ router.get('/backtests/bulk', async (req, res) => {
 router.get('/backtests/bulk-all', async (req, res) => {
   try {
     const { window_days = 30 } = req.query;
-    const supabase = req.supabase;
+    const { supabase } = require('../db/supabase');
     const { data, error } = await supabase
       .from('astro_backtests')
       .select('event_type, instrument, window_days, n_observations, avg_return_pct, win_rate_pct, cagr_pct, sharpe_ratio, date_from, date_to')
