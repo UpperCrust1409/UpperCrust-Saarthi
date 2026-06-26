@@ -33383,13 +33383,17 @@ async function aqRunFrontTest() {
     const evR=await aqFetch(`/api/astro/events?from=${today.toISOString().split('T')[0]}&to=${futureDate.toISOString().split('T')[0]}`);
     const {events=[]}=await evR.json();
 
-    // Map DB events to specific backtest keys (planet-specific)
+    // Map DB events to specific backtest keys (planet-pair specific)
     function evToBacktestKey(ev) {
-      const et=ev.event_type, pl=ev.planet;
+      const et=ev.event_type, pl=ev.planet, pl2=ev.planet2;
       if(et==='RETROGRADE_START') return pl+'_RETROGRADE';
+      if(et==='RETROGRADE_END') return 'RETROGRADE_END_'+pl;
       if(et==='SIGN_CHANGE') return pl+'_SIGN_CHANGE';
-      if(et==='CONJUNCTION' && pl==='Jupiter' && ev.planet2==='Saturn') return 'JUPITER_SATURN_CONJUNCTION';
-      if(et==='CONJUNCTION') return 'CONJUNCTION';
+      if(et==='CONJUNCTION') {
+        // Use planet-pair specific key for major conjunctions
+        const pair=[pl,pl2].filter(Boolean).sort().join('_');
+        return 'CONJUNCTION_'+pair;
+      }
       return et;
     }
 
@@ -33400,12 +33404,31 @@ async function aqRunFrontTest() {
     const btKeys=[...new Set(filteredEvents.map(evToBacktestKey))];
     const backtests={};
 
-    for(const key of btKeys) {
+    // Build event type + planet filter for each key
+    const keyToFilter = {};
+    for(const ev of filteredEvents) {
+      const key = evToBacktestKey(ev);
+      if(!keyToFilter[key]) {
+        keyToFilter[key] = {
+          event_type: ev.event_type,
+          planet: ev.planet,
+          planet2: ev.planet2||null,
+          btKey: key
+        };
+      }
+    }
+
+    for(const [key, filter] of Object.entries(keyToFilter)) {
       try {
         const btR=await aqFetch('/api/astro/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({event_type:key,instrument,window_days,date_from:'2005-01-01',date_to:today.toISOString().split('T')[0]})});
+          body:JSON.stringify({
+            event_type: key, // Use the specific key
+            instrument, window_days,
+            date_from:'2005-01-01',
+            date_to:today.toISOString().split('T')[0]
+          })});
         const bt=await btR.json();
-        if(!bt.error && bt.n_observations>0) backtests[key]=bt;
+        if(!bt.error && bt.n_observations>2) backtests[key]=bt;
       } catch(e){}
     }
 
