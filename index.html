@@ -1,6 +1,6 @@
 <!DOCTYPE html><!-- v1781604339 -->
 <html lang="en">
-<head>
+<head><!-- AstroQuant v2.1 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
@@ -33241,15 +33241,17 @@ async function aqRenderSignalHub(el) {
     const todayStr=today.toISOString().split('T')[0];
     const futureStr=future.toISOString().split('T')[0];
 
-    // ONE call to get ALL cached backtests
+    // Fetch events for 24 months for next-date lookup, backtests from cache
+    const future24 = new Date(today); future24.setMonth(future24.getMonth()+24);
     const [evRes, btRes] = await Promise.all([
-      aqFetch(`/api/astro/events?from=${todayStr}&to=${futureStr}`),
+      aqFetch(`/api/astro/events?from=${todayStr}&to=${future24.toISOString().split('T')[0]}`),
       aqFetch('/api/astro/backtests/bulk-all?window_days=30')
     ]);
     const {events=[]} = await evRes.json();
     const {backtests=[]} = await btRes.json();
 
-    const filteredEvents = events.filter(ev=>ev.planet!=='Moon'&&ev.planet2!=='Moon');
+    const allEvents = events.filter(ev=>ev.planet!=='Moon'&&ev.planet2!=='Moon');
+    const filteredEvents = allEvents;
 
     function evToKey(ev){
       const et=ev.event_type,pl=ev.planet,pl2=ev.planet2;
@@ -33285,14 +33287,14 @@ async function aqRenderSignalHub(el) {
       return false;
     });
 
-    // Build results with next event date
+    // Build results with next event date — search all events
     const results = relevant.map(bt=>{
-      // Match by exact key OR by base event type + planet
-      const planet = bt.event_type.replace(/_RETROGRADE$/,'').replace(/_SIGN_CHANGE$/,'').replace(/^RETROGRADE_END_/,'');
-      const nextEv = filteredEvents.find(ev=>{
+      const planet = bt.event_type.replace(/_RETROGRADE$/,'').replace(/_SIGN_CHANGE$/,'').replace(/^RETROGRADE_END_/,'').replace(/^CONJUNCTION_/,'').split('_')[0];
+      const nextEv = allEvents.find(ev=>{
         if(evToKey(ev)===bt.event_type) return true;
         if(bt.event_type.endsWith('_SIGN_CHANGE')&&ev.event_type==='SIGN_CHANGE'&&ev.planet===planet) return true;
         if(bt.event_type.endsWith('_RETROGRADE')&&ev.event_type==='RETROGRADE_START'&&ev.planet===planet) return true;
+        if(bt.event_type.startsWith('RETROGRADE_END_')&&ev.event_type==='RETROGRADE_END'&&ev.planet===planet) return true;
         return false;
       });
       const score = (bt.avg_return_pct||0) * (bt.win_rate_pct||50) / 100;
@@ -33340,16 +33342,20 @@ async function aqRenderSignalHub(el) {
       <div style="margin-bottom:12px;padding:10px 14px;background:var(--amb2);border:1px solid var(--ambbdr);border-radius:var(--r);font-size:10px;color:var(--ink3)">
         ⚠️ <b>Research only.</b> Historical patterns ≠ future results. Combine with fundamental + technical analysis.
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:14px">
-        <div class="tbl">
-          <div class="tbl-hd" style="background:var(--grn2)"><span class="tbl-ht" style="color:var(--green)">🟢 Top Opportunities — Next 3 Months</span></div>
-          <table><thead><tr><th>Instrument</th><th>Event</th><th>Next Date</th><th>Hist. Avg</th><th>Win Rate</th><th>Signal</th></tr></thead>
+      <div style="margin-bottom:14px">
+        <div class="tbl" style="margin-bottom:12px">
+          <div class="tbl-hd" style="background:var(--grn2)"><span class="tbl-ht" style="color:var(--green)">🟢 Top Opportunities</span></div>
+          <div style="overflow-x:auto">
+          <table style="min-width:500px"><thead><tr><th>Instrument</th><th>Event</th><th>Next Date</th><th>Hist. Avg</th><th>Win Rate</th><th>Signal</th></tr></thead>
           <tbody>${buys.map(mkRow).join('')}</tbody></table>
+          </div>
         </div>
         <div class="tbl">
-          <div class="tbl-hd" style="background:var(--red2)"><span class="tbl-ht" style="color:var(--red)">🔴 Caution Zones — Next 3 Months</span></div>
-          <table><thead><tr><th>Instrument</th><th>Event</th><th>Next Date</th><th>Hist. Avg</th><th>Win Rate</th><th>Signal</th></tr></thead>
+          <div class="tbl-hd" style="background:var(--red2)"><span class="tbl-ht" style="color:var(--red)">🔴 Caution Zones</span></div>
+          <div style="overflow-x:auto">
+          <table style="min-width:500px"><thead><tr><th>Instrument</th><th>Event</th><th>Next Date</th><th>Hist. Avg</th><th>Win Rate</th><th>Signal</th></tr></thead>
           <tbody>${sells.map(mkRow).join('')}</tbody></table>
+          </div>
         </div>
       </div>
       <div class="tbl">
