@@ -69,8 +69,16 @@ async function runBacktest({ event_type, instrument, window_days = 30, date_from
     eventsQuery = eventsQuery.eq('event_type', 'CONJUNCTION');
   } else if (event_type === 'RETROGRADE_START') {
     eventsQuery = eventsQuery.eq('event_type', 'RETROGRADE_START');
+  } else if (event_type.startsWith('RETROGRADE_END_')) {
+    const planet = event_type.replace('RETROGRADE_END_', '');
+    eventsQuery = eventsQuery.eq('event_type', 'RETROGRADE_END').eq('planet', planet);
   } else if (event_type === 'SIGN_CHANGE') {
     eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').in('planet', ['Jupiter','Saturn','Rahu','Mars']);
+  } else if (event_type.startsWith('CONJUNCTION_')) {
+    // Planet-pair specific conjunction e.g. CONJUNCTION_Jupiter_Sun
+    const planets = event_type.replace('CONJUNCTION_', '').split('_');
+    eventsQuery = eventsQuery.eq('event_type', 'CONJUNCTION')
+      .or(`and(planet.eq.${planets[0]},planet2.eq.${planets[1]}),and(planet.eq.${planets[1]},planet2.eq.${planets[0]})`);
   } else {
     eventsQuery = eventsQuery.eq('event_type', event_type);
   }
