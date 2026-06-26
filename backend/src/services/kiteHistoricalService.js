@@ -21,7 +21,8 @@ const KITE_TOKENS = {
   'NIFTY_FMCG': 261641,
   'NIFTY_METAL': 261385,
   'NIFTY_REALTY': 261657,
-  'NIFTY_ENERGY': 260873,
+  'NIFTY_ENERGY':   260873,
+  'NIFTY_DEFENCE':  633601,
 };
 
 // Yahoo Finance tickers for commodities (all USD)

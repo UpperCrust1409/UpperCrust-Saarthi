@@ -74,8 +74,18 @@ async function computeScores(dateStr, positions) {
     if (retrogradeActive) astro_score -= 15;
     astro_score = Math.max(0, Math.min(100, Math.round(astro_score * 10) / 10));
 
-    // Confidence: based on number of observations (simplified — static for now)
-    const confidence = retrogradeActive ? 45 : 65;
+    // Dynamic confidence based on planet state quality
+    let confidence = 50;
+    // Base confidence from planet strength
+    const avgStrength = Object.values(factors).reduce((s,f)=>s+(f.strength||50),0) / Math.max(Object.keys(factors).length,1);
+    confidence = Math.round(40 + (avgStrength / 100) * 40); // 40-80 range
+    // Retrograde penalty
+    if (retrogradeActive) confidence = Math.round(confidence * 0.75);
+    // Exaltation boost — if primary planet is in exaltation sign, higher confidence
+    const primPos = posMap[primaryPlanet];
+    if (primPos && primPos.strength > 70) confidence = Math.min(85, confidence + 10);
+    if (primPos && primPos.strength < 40) confidence = Math.max(30, confidence - 10);
+    confidence = Math.max(30, Math.min(85, confidence));
 
     sectorScores.push({
       date: dateStr, sector, astro_score,

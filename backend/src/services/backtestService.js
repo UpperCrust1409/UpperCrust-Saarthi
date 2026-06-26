@@ -40,23 +40,37 @@ async function runBacktest({ event_type, instrument, window_days = 30, date_from
     .select('event_date, planet, planet2, description')
     .order('event_date', { ascending: true });
 
-  // Map event_type to DB filter
+  // Map event_type to DB filter — complete planet-specific mapping
   if (event_type === 'MERCURY_RETROGRADE') {
     eventsQuery = eventsQuery.eq('event_type', 'RETROGRADE_START').eq('planet', 'Mercury');
+  } else if (event_type === 'VENUS_RETROGRADE') {
+    eventsQuery = eventsQuery.eq('event_type', 'RETROGRADE_START').eq('planet', 'Venus');
+  } else if (event_type === 'MARS_RETROGRADE') {
+    eventsQuery = eventsQuery.eq('event_type', 'RETROGRADE_START').eq('planet', 'Mars');
   } else if (event_type === 'JUPITER_SIGN_CHANGE') {
     eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').eq('planet', 'Jupiter');
   } else if (event_type === 'SATURN_SIGN_CHANGE') {
     eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').eq('planet', 'Saturn');
-  } else if (event_type === 'MARS_RETROGRADE') {
-    eventsQuery = eventsQuery.eq('event_type', 'RETROGRADE_START').eq('planet', 'Mars');
-  } else if (event_type === 'VENUS_RETROGRADE') {
-    eventsQuery = eventsQuery.eq('event_type', 'RETROGRADE_START').eq('planet', 'Venus');
+  } else if (event_type === 'RAHU_SIGN_CHANGE') {
+    eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').eq('planet', 'Rahu');
+  } else if (event_type === 'MARS_SIGN_CHANGE') {
+    eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').eq('planet', 'Mars');
+  } else if (event_type === 'MERCURY_SIGN_CHANGE') {
+    eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').eq('planet', 'Mercury');
+  } else if (event_type === 'VENUS_SIGN_CHANGE') {
+    eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').eq('planet', 'Venus');
   } else if (event_type === 'ECLIPSE_SOLAR') {
     eventsQuery = eventsQuery.eq('event_type', 'ECLIPSE_SOLAR');
   } else if (event_type === 'ECLIPSE_LUNAR') {
     eventsQuery = eventsQuery.eq('event_type', 'ECLIPSE_LUNAR');
   } else if (event_type === 'JUPITER_SATURN_CONJUNCTION') {
     eventsQuery = eventsQuery.eq('event_type', 'CONJUNCTION').eq('planet', 'Jupiter').eq('planet2', 'Saturn');
+  } else if (event_type === 'CONJUNCTION') {
+    eventsQuery = eventsQuery.eq('event_type', 'CONJUNCTION');
+  } else if (event_type === 'RETROGRADE_START') {
+    eventsQuery = eventsQuery.eq('event_type', 'RETROGRADE_START');
+  } else if (event_type === 'SIGN_CHANGE') {
+    eventsQuery = eventsQuery.eq('event_type', 'SIGN_CHANGE').in('planet', ['Jupiter','Saturn','Rahu','Mars']);
   } else {
     eventsQuery = eventsQuery.eq('event_type', event_type);
   }
