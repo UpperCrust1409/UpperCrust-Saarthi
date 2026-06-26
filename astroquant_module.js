@@ -49,17 +49,26 @@ const AQ_EVENTS = [
 ];
 
 const AQ_INSTRUMENTS = [
-  {val:'NIFTY50',       label:'Nifty 50'},
-  {val:'NIFTY500',      label:'Nifty 500'},
-  {val:'SENSEX',        label:'Sensex'},
-  {val:'GOLD',          label:'Gold (MCX)'},
-  {val:'SILVER',        label:'Silver (MCX)'},
-  {val:'NIFTY_BANK',   label:'Nifty Bank'},
-  {val:'NIFTY_IT',     label:'Nifty IT'},
-  {val:'NIFTY_PHARMA', label:'Nifty Pharma'},
-  {val:'NIFTY_AUTO',   label:'Nifty Auto'},
-  {val:'NIFTY_FMCG',   label:'Nifty FMCG'},
-  {val:'NIFTY_METAL',  label:'Nifty Metal'},
+  // ── Indian Indices (INR) ──
+  {val:'NIFTY50',       label:'Nifty 50 (INR)'},
+  {val:'NIFTY500',      label:'Nifty 500 (INR)'},
+  {val:'SENSEX',        label:'Sensex (INR)'},
+  {val:'NIFTY_BANK',    label:'Nifty Bank (INR)'},
+  {val:'NIFTY_IT',      label:'Nifty IT (INR)'},
+  {val:'NIFTY_PHARMA',  label:'Nifty Pharma (INR)'},
+  {val:'NIFTY_AUTO',    label:'Nifty Auto (INR)'},
+  {val:'NIFTY_FMCG',    label:'Nifty FMCG (INR)'},
+  {val:'NIFTY_METAL',   label:'Nifty Metal (INR)'},
+  // ── Commodities (USD) ──
+  {val:'GOLD',          label:'Gold (USD/oz)'},
+  {val:'SILVER',        label:'Silver (USD/oz)'},
+  {val:'CRUDE_OIL',     label:'Crude Oil (USD/bbl)'},
+  {val:'COPPER',        label:'Copper (USD/lb)'},
+  {val:'NATURAL_GAS',   label:'Natural Gas (USD)'},
+  {val:'PLATINUM',      label:'Platinum (USD/oz)'},
+  {val:'PALLADIUM',     label:'Palladium (USD/oz)'},
+  {val:'ALUMINIUM',     label:'Aluminium (USD)'},
+  {val:'NICKEL',        label:'Nickel (USD)'},
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────
