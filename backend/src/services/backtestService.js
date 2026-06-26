@@ -17,7 +17,7 @@ const CACHE_TTL_DAYS = 7; // Re-run backtest if older than N days
  * @param {string} date_from
  * @param {string} date_to
  */
-async function runBacktest({ event_type, instrument, window_days = 30, date_from, date_to }) {
+async function runBacktest({ event_type, instrument, window_days = 30, date_from, date_to, cache_only = false }) {
   // Check cache first
   const { data: cached } = await supabase
     .from('astro_backtests')
@@ -32,6 +32,10 @@ async function runBacktest({ event_type, instrument, window_days = 30, date_from
   if (cached) {
     const ageDays = (Date.now() - new Date(cached.created_at).getTime()) / 86400000;
     if (ageDays < CACHE_TTL_DAYS) return formatResult(cached);
+  }
+  // cache_only mode: return empty if not cached (don't fetch OHLC)
+  if (cache_only) {
+    return { error: 'Not cached yet', n_observations: 0 };
   }
 
   // Fetch events
