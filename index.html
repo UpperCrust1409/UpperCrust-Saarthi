@@ -33279,7 +33279,7 @@ async function aqRenderSignalHub(el) {
       const batch=pairs.slice(i,i+10);
       const batchResults=await Promise.allSettled(batch.map(async({inst,key})=>{
         const r=await aqFetch('/api/astro/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({event_type:key,instrument:inst.val,window_days:30,date_from:'2005-01-01',date_to:todayStr})});
+          body:JSON.stringify({event_type:key,instrument:inst.val,window_days:30,date_from:'2005-01-01',date_to:todayStr,cache_only:true})});
         const bt=await r.json();
         if(!bt.error&&bt.n_observations>5){
           const nextEv=filteredEvents.find(ev=>evToKey(ev)===key);
@@ -33647,29 +33647,98 @@ async function aqRunFrontTest() {
 // ═══ TAB 5 — CALENDAR ══════════════════════════════════════════════
 async function aqRenderCalendar(el) {
   const {events=[]}=await(await aqFetch('/api/astro/events?from='+new Date().toISOString().split('T')[0])).json();
+  
+  // Filter out Moon events for cleaner calendar
+  const sigEvents = events.filter(ev=>ev.planet!=='Moon'&&ev.planet2!=='Moon');
+  
   const byMonth={};
-  for(const ev of events){const m=ev.event_date?.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(ev);}
-  const evColor={RETROGRADE_START:'var(--red)',RETROGRADE_END:'var(--green)',SIGN_CHANGE:'var(--gold)',ECLIPSE_SOLAR:'#e05020',ECLIPSE_LUNAR:'#4040c0',CONJUNCTION:'var(--amber)',MOON_CYCLE:'#8040a0'};
+  for(const ev of sigEvents){const m=ev.event_date?.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(ev);}
+  
+  const evColor={RETROGRADE_START:'var(--red)',RETROGRADE_END:'var(--green)',SIGN_CHANGE:'var(--gold)',ECLIPSE_SOLAR:'#e05020',ECLIPSE_LUNAR:'#4040c0',CONJUNCTION:'var(--amber)'};
+
+  // Fetch cached backtest signals for each unique event type
+  function evToKey(ev){
+    const et=ev.event_type,pl=ev.planet,pl2=ev.planet2;
+    if(et==='RETROGRADE_START') return pl+'_RETROGRADE';
+    if(et==='RETROGRADE_END') return 'RETROGRADE_END_'+pl;
+    if(et==='SIGN_CHANGE') return pl+'_SIGN_CHANGE';
+    if(et==='CONJUNCTION'){const pair=[pl,pl2].filter(Boolean).sort().join('_');return 'CONJUNCTION_'+pair;}
+    return et;
+  }
+
+  // Key instruments to show in calendar
+  const CAL_INSTRUMENTS = [
+    {val:'NIFTY50',label:'Nifty 50'},{val:'NIFTY_BANK',label:'Nifty Bank'},
+    {val:'NIFTY_IT',label:'Nifty IT'},{val:'NIFTY_METAL',label:'Nifty Metal'},
+    {val:'NIFTY_DEFENCE',label:'Defence'},{val:'NIFTY_ENERGY',label:'Energy'},
+    {val:'GOLD',label:'Gold'},{val:'SILVER',label:'Silver'},
+    {val:'CRUDE_OIL',label:'Crude Oil'},{val:'NATURAL_GAS',label:'Nat Gas'},
+  ];
+
+  // Fetch all backtest signals in parallel (cache_only)
+  const btKeys=[...new Set(sigEvents.map(evToKey))];
+  const btCache={};
+  const todayStr=new Date().toISOString().split('T')[0];
+  
+  await Promise.allSettled(btKeys.flatMap(key=>
+    CAL_INSTRUMENTS.map(async inst=>{
+      try{
+        const r=await aqFetch('/api/astro/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({event_type:key,instrument:inst.val,window_days:30,date_from:'2005-01-01',date_to:todayStr,cache_only:true})});
+        const bt=await r.json();
+        if(!bt.error&&bt.n_observations>3){
+          if(!btCache[key]) btCache[key]=[];
+          btCache[key].push({label:inst.label,ret:bt.avg_return_pct,wr:bt.win_rate_pct,n:bt.n_observations});
+        }
+      }catch(e){}
+    })
+  ));
+
+  // Sort each event's instruments by return
+  Object.keys(btCache).forEach(k=>{
+    btCache[k].sort((a,b)=>b.ret-a.ret);
+  });
+
+  function renderCalSignals(ev) {
+    const key=evToKey(ev);
+    const sigs=btCache[key];
+    if(!sigs||!sigs.length) return aqEventImpact(ev)||'';
+    const top=sigs.slice(0,3);
+    const bottom=sigs.slice(-2).filter(s=>s.ret<0);
+    let html='<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">';
+    top.forEach(s=>{
+      const c=s.ret>2?'var(--green)':s.ret>0?'#227722':'var(--ink3)';
+      html+=`<span style="font-size:9px;background:var(--grn2);color:${c};border:1px solid var(--grnbdr);padding:1px 6px;border-radius:8px;font-weight:600">${s.label} ${s.ret>=0?'+':''}${s.ret.toFixed(1)}%</span>`;
+    });
+    bottom.forEach(s=>{
+      html+=`<span style="font-size:9px;background:var(--red2);color:var(--red);border:1px solid var(--redbdr);padding:1px 6px;border-radius:8px;font-weight:600">${s.label} ${s.ret.toFixed(1)}%</span>`;
+    });
+    html+='</div>';
+    return html;
+  }
+
   el.innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 260px;gap:16px">
+    <div style="display:grid;grid-template-columns:1fr 240px;gap:16px">
       <div>
-        ${Object.entries(byMonth).slice(0,6).map(([month,evs])=>`
+        ${Object.entries(byMonth).slice(0,4).map(([month,evs])=>`
           <div class="panel" style="margin-bottom:12px">
             <div style="font-size:11px;font-weight:700;color:var(--ink);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">
               ${new Date(month+'-01').toLocaleDateString('en-IN',{month:'long',year:'numeric'})}
             </div>
             ${evs.map(ev=>`
-              <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--bdr)">
-                <div style="width:28px;text-align:center;font-size:18px;flex-shrink:0">${eventIcon(ev.event_type)}</div>
-                <div style="flex:1">
-                  <div style="font-size:12px;font-weight:600;color:var(--ink)">${ev.description||ev.event_type?.replace(/_/g,' ')}</div>
-                  <div style="font-size:10px;color:var(--ink4)">${ev.planet||''}${ev.planet2?' + '+ev.planet2:''}</div>
-                  <div style="font-size:10px;color:var(--ink3);margin-top:2px">${aqEventImpact(ev)}</div>
+              <div style="padding:10px 0;border-bottom:1px solid var(--bdr)">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div style="width:24px;text-align:center;font-size:16px;flex-shrink:0">${eventIcon(ev.event_type)}</div>
+                  <div style="flex:1">
+                    <div style="font-size:12px;font-weight:600;color:var(--ink)">${ev.description||ev.event_type?.replace(/_/g,' ')}</div>
+                    <div style="font-size:10px;color:var(--ink4)">${ev.planet||''}${ev.planet2?' + '+ev.planet2:''}</div>
+                  </div>
+                  <div style="text-align:right;flex-shrink:0">
+                    <div style="font-family:var(--font-mono);font-size:12px;font-weight:600">${ev.event_date?.slice(8)} ${new Date(ev.event_date).toLocaleDateString('en-IN',{month:'short'})}</div>
+                    <div style="font-size:9px;font-weight:700;color:${evColor[ev.event_type]||'var(--ink3)'};text-transform:uppercase">${ev.event_type?.replace(/_/g,' ')}</div>
+                  </div>
                 </div>
-                <div style="text-align:right;flex-shrink:0">
-                  <div style="font-family:var(--font-mono);font-size:12px;font-weight:600">${ev.event_date?.slice(8)} ${new Date(ev.event_date).toLocaleDateString('en-IN',{month:'short'})}</div>
-                  <div style="font-size:9px;font-weight:700;color:${evColor[ev.event_type]||'var(--ink3)'};text-transform:uppercase">${ev.event_type?.replace(/_/g,' ')}</div>
-                </div>
+                ${renderCalSignals(ev)}
               </div>`).join('')}
           </div>`).join('')}
       </div>
@@ -33683,9 +33752,15 @@ async function aqRenderCalendar(el) {
             </div>`).join('')}
         </div>
         <div class="panel" style="margin-top:12px">
-          <div style="font-size:10px;font-weight:700;color:var(--ink4);margin-bottom:10px;text-transform:uppercase">Total Upcoming</div>
-          <div style="font-family:var(--font-mono);font-size:28px;font-weight:700;color:var(--gold)">${events.length}</div>
+          <div style="font-size:10px;font-weight:700;color:var(--ink4);margin-bottom:10px;text-transform:uppercase">Upcoming (excl. Moon)</div>
+          <div style="font-family:var(--font-mono);font-size:28px;font-weight:700;color:var(--gold)">${sigEvents.length}</div>
           <div style="font-size:10px;color:var(--ink4)">events in next 90 days</div>
+        </div>
+        <div class="panel" style="margin-top:12px">
+          <div style="font-size:10px;font-weight:700;color:var(--ink4);margin-bottom:8px;text-transform:uppercase">Signal Legend</div>
+          <div style="font-size:10px;color:var(--green);margin-bottom:4px">🟢 Green badge = historically positive</div>
+          <div style="font-size:10px;color:var(--red)">🔴 Red badge = historically negative</div>
+          <div style="font-size:10px;color:var(--ink4);margin-top:6px">Based on 20yr backtest data · 30-day window</div>
         </div>
       </div>
     </div>`;
