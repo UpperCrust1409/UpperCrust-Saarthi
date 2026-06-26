@@ -49,6 +49,8 @@ const AQ_INSTRUMENTS = [
   {val:'PALLADIUM',    label:'Palladium (USD/oz)'},
   {val:'ALUMINIUM',    label:'Aluminium (USD)'},
   {val:'NICKEL',       label:'Nickel (USD)'},
+  {val:'NIFTY_DEFENCE', label:'Nifty Defence (INR)'},
+  {val:'NIFTY_ENERGY',  label:'Nifty Energy (INR)'},
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -89,6 +91,31 @@ function aqMd(text) {
     })
     .replace(/\n\n/g, '<br>')
     .replace(/\n/g, ' ');
+}
+
+// Planet → sector/commodity impact mapping
+function aqEventImpact(ev) {
+  const PLANET_SECTORS = {
+    Jupiter:  {pos:['Banking','Financial Services'],  comm:['Gold']},
+    Saturn:   {pos:['Metals','Mining','Chemicals'],    comm:['Silver','Aluminium','Nickel']},
+    Mars:     {pos:['Defence','Capital Goods','Auto'], comm:['Crude Oil','Copper']},
+    Mercury:  {pos:['IT','Telecom','Auto'],             comm:['Natural Gas']},
+    Venus:    {pos:['FMCG','Consumer Durables'],        comm:['Silver','Palladium','Platinum']},
+    Sun:      {pos:['Power','Capital Goods'],           comm:['Gold']},
+    Moon:     {pos:['Pharma'],                          comm:['Silver']},
+    Rahu:     {pos:[],                                  comm:['Gold','Crude Oil']},
+    Ketu:     {pos:[],                                  comm:['Gold']},
+  };
+  const planet = ev.planet;
+  const info = PLANET_SECTORS[planet];
+  if (!info) return '';
+  const isRetro = ev.event_type === 'RETROGRADE_START';
+  const sectors = info.pos.slice(0,2).join(', ');
+  const comms = info.comm.slice(0,2).join(', ');
+  const color = isRetro ? 'var(--red)' : 'var(--green)';
+  const sign = isRetro ? '↓ Caution' : '↑ Watch';
+  if (!sectors && !comms) return '';
+  return \`<span style="color:\${color};font-weight:600">\${sign}:</span> \${[sectors, comms].filter(Boolean).join(' · ')}\`;
 }
 
 function eventIcon(type) {
@@ -189,7 +216,7 @@ async function aqRenderSectors(el) {
   const {scores=[],date}=await(await aqFetch('/api/astro/sectors')).json();
   el.innerHTML=`
     <div class="tbl">
-      <div class="tbl-hd"><span class="tbl-ht">⬡ Sector Astro Scores — ${date}</span><span style="font-size:10px;color:var(--ink4)">Higher = stronger planetary support</span></div>
+      <div class="tbl-hd"><span class="tbl-ht">⬡ Sector Astro Scores — ${date}</span><span style="font-size:10px;color:var(--ink4)">Higher = stronger planetary support · Confidence improves with daily data accumulation</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1px;background:var(--bdr)">
         ${scores.map(s=>`
           <div style="background:var(--sur);padding:14px 16px">
@@ -375,16 +402,29 @@ async function aqRunFrontTest() {
     const evR=await aqFetch(`/api/astro/events?from=${today.toISOString().split('T')[0]}&to=${futureDate.toISOString().split('T')[0]}`);
     const {events=[]}=await evR.json();
 
-    // Fetch historical backtests for all event types
-    const eventTypes=[...new Set(events.map(e=>e.event_type))];
+    // Map DB events to specific backtest keys (planet-specific)
+    function evToBacktestKey(ev) {
+      const et=ev.event_type, pl=ev.planet;
+      if(et==='RETROGRADE_START') return pl+'_RETROGRADE';
+      if(et==='SIGN_CHANGE') return pl+'_SIGN_CHANGE';
+      if(et==='CONJUNCTION' && pl==='Jupiter' && ev.planet2==='Saturn') return 'JUPITER_SATURN_CONJUNCTION';
+      if(et==='CONJUNCTION') return 'CONJUNCTION';
+      return et;
+    }
+
+    // Filter out Moon events (too frequent, too noisy for front-test)
+    const filteredEvents = events.filter(ev => ev.planet !== 'Moon' && ev.planet2 !== 'Moon');
+
+    // Fetch historical backtests for each unique backtest key
+    const btKeys=[...new Set(filteredEvents.map(evToBacktestKey))];
     const backtests={};
 
-    for(const et of eventTypes) {
+    for(const key of btKeys) {
       try {
         const btR=await aqFetch('/api/astro/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({event_type:et,instrument,window_days,date_from:'2005-01-01',date_to:today.toISOString().split('T')[0]})});
+          body:JSON.stringify({event_type:key,instrument,window_days,date_from:'2005-01-01',date_to:today.toISOString().split('T')[0]})});
         const bt=await btR.json();
-        if(!bt.error && bt.n_observations>0) backtests[et]=bt;
+        if(!bt.error && bt.n_observations>0) backtests[key]=bt;
       } catch(e){}
     }
 
@@ -421,8 +461,9 @@ async function aqRunFrontTest() {
             <th>Signal</th>
           </tr></thead>
           <tbody>
-            ${events.map(ev=>{
-              const bt=backtests[ev.event_type];
+            ${filteredEvents.map(ev=>{
+              const btKey=evToBacktestKey(ev);
+              const bt=backtests[btKey];
               const hasData=bt&&bt.n_observations>2;
               const ret=bt?.avg_return_pct;
               const wr=bt?.win_rate_pct;
@@ -465,6 +506,7 @@ async function aqRenderCalendar(el) {
                 <div style="flex:1">
                   <div style="font-size:12px;font-weight:600;color:var(--ink)">${ev.description||ev.event_type?.replace(/_/g,' ')}</div>
                   <div style="font-size:10px;color:var(--ink4)">${ev.planet||''}${ev.planet2?' + '+ev.planet2:''}</div>
+                  <div style="font-size:10px;color:var(--ink3);margin-top:2px">${aqEventImpact(ev)}</div>
                 </div>
                 <div style="text-align:right;flex-shrink:0">
                   <div style="font-family:var(--font-mono);font-size:12px;font-weight:600">${ev.event_date?.slice(8)} ${new Date(ev.event_date).toLocaleDateString('en-IN',{month:'short'})}</div>
