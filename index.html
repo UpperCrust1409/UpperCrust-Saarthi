@@ -33254,7 +33254,7 @@ async function aqRenderSignalHub(el) {
     const filteredEvents = allEvents;
 
     function evToKey(ev){
-      const et=ev.event_type,pl=ev.planet,pl2=ev.planet2;
+      const et=ev.event_type,pl=(ev.planet||'').toUpperCase(),pl2=(ev.planet2||'').toUpperCase();
       if(et==='RETROGRADE_START') return pl+'_RETROGRADE';
       if(et==='RETROGRADE_END') return 'RETROGRADE_END_'+pl;
       if(et==='SIGN_CHANGE') return pl+'_SIGN_CHANGE';
@@ -33292,9 +33292,10 @@ async function aqRenderSignalHub(el) {
       const planet = bt.event_type.replace(/_RETROGRADE$/,'').replace(/_SIGN_CHANGE$/,'').replace(/^RETROGRADE_END_/,'').replace(/^CONJUNCTION_/,'').split('_')[0];
       const nextEv = allEvents.find(ev=>{
         if(evToKey(ev)===bt.event_type) return true;
-        if(bt.event_type.endsWith('_SIGN_CHANGE')&&ev.event_type==='SIGN_CHANGE'&&ev.planet===planet) return true;
-        if(bt.event_type.endsWith('_RETROGRADE')&&ev.event_type==='RETROGRADE_START'&&ev.planet===planet) return true;
-        if(bt.event_type.startsWith('RETROGRADE_END_')&&ev.event_type==='RETROGRADE_END'&&ev.planet===planet) return true;
+        const evPlanet=(ev.planet||'').toUpperCase();
+        if(bt.event_type.endsWith('_SIGN_CHANGE')&&ev.event_type==='SIGN_CHANGE'&&evPlanet===planet) return true;
+        if(bt.event_type.endsWith('_RETROGRADE')&&ev.event_type==='RETROGRADE_START'&&evPlanet===planet) return true;
+        if(bt.event_type.startsWith('RETROGRADE_END_')&&ev.event_type==='RETROGRADE_END'&&evPlanet===planet) return true;
         return false;
       });
       const score = (bt.avg_return_pct||0) * (bt.win_rate_pct||50) / 100;
@@ -33545,7 +33546,7 @@ async function aqRunFrontTest() {
     }
 
     function evToKey(ev){
-      const et=ev.event_type,pl=ev.planet,pl2=ev.planet2;
+      const et=ev.event_type,pl=(ev.planet||'').toUpperCase(),pl2=(ev.planet2||'').toUpperCase();
       if(et==='RETROGRADE_START') return pl+'_RETROGRADE';
       if(et==='RETROGRADE_END') return 'RETROGRADE_END_'+pl;
       if(et==='SIGN_CHANGE') return pl+'_SIGN_CHANGE';
