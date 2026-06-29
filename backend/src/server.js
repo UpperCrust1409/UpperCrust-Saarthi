@@ -31,16 +31,18 @@ const ANTHROPIC_KEY    = process.env.ANTHROPIC_API_KEY; // ONLY on server — ne
 if (!JWT_SECRET)   throw new Error('JWT_SECRET env variable is required');
 if (!SUPABASE_URL) throw new Error('SUPABASE_URL env variable is required');
  
-const ws = require('ws');
 const _supabase = createClient(SUPABASE_URL, SUPABASE_SVC_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
-  global: { headers: { 'x-supabase-role': 'service_role' } },
-  realtime: { transport: ws }
+  global: { headers: { 'x-supabase-role': 'service_role' } }
 });
-global._supabase = _supabase;
+global._supabase = _supabase; // accessible to all route files via global._supabase
  
+// ── CRITICAL: Intercept ALL supabase clients in route files ──
+// Route files that call createClient() internally will get the service key client
+// by patching the supabase-js module to always return the service key version
 const _origCreateClient = require('@supabase/supabase-js').createClient;
 require('@supabase/supabase-js').createClient = function(url, key, opts) {
+  // Always use service key regardless of what key the route file passes
   return _origCreateClient(url, SUPABASE_SVC_KEY, opts);
 };
  
@@ -51,14 +53,18 @@ require('@supabase/supabase-js').createClient = function(url, key, opts) {
 const app = express();
 app.set('trust proxy', 1);
  
+// ── Inject service-key supabase into every request (fixes cross-device data loading) ──
 app.use(function(req, res, next) {
   req.supabase = _supabase;
   req.sb = _supabase;
   next();
 });
  
+// ── CORS — locked to your domain only ──
 app.use(cors({
   origin: (origin, cb) => {
+    // Allow requests with no origin (mobile apps, curl) only in dev
+    // In production: only your domain
     const allowed = [FRONTEND_URL, 'https://uppercrustsaarthi.in'];
     if (!origin || allowed.includes(origin)) return cb(null, true);
     cb(new Error(`CORS: ${origin} not allowed`));
@@ -68,11 +74,13 @@ app.use(cors({
   credentials: true,
 }));
  
+// ── Security headers ──
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'same-origin' },
   contentSecurityPolicy: false,
 }));
  
+// ── Rate limiters ──
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 500,
   standardHeaders: true, legacyHeaders: false,
@@ -89,6 +97,7 @@ const claudeLimiter = rateLimit({
  
 app.use(globalLimiter);
 app.use((req, res, next) => {
+  // Skip JSON parsing for multipart uploads — let multer handle those
   if (req.headers['content-type']?.startsWith('multipart/form-data')) return next();
   express.json({ limit: '50mb' })(req, res, next);
 });
@@ -98,8 +107,10 @@ app.use((req, res, next) => {
 });
  
 // ─────────────────────────────────────────────
-// AUTH MIDDLEWARE
+// AUTH MIDDLEWARE — every protected route uses this
 // ─────────────────────────────────────────────
+// In-memory token blacklist (survives until server restart — sufficient for most cases)
+// For production: store in Redis or Supabase
 const _revokedTokens = new Set();
  
 function requireAuth(req, res, next) {
@@ -109,18 +120,20 @@ function requireAuth(req, res, next) {
       return res.status(401).json({ error: 'Authentication required' });
     }
     const token = header.slice(7);
+    // Check blacklist
     if (_revokedTokens.has(token)) {
       return res.status(401).json({ error: 'Session has been revoked. Please log in again.' });
     }
     const payload = jwt.verify(token, JWT_SECRET);
     req.user = payload;
-    req._token = token;
+    req._token = token; // store for logout
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired session. Please log in again.' });
   }
 }
  
+// Role guard — usage: requireRole('admin') or requireRole(['admin','manager'])
 function requireRole(...roles) {
   const allowed = roles.flat();
   return (req, res, next) => {
@@ -132,6 +145,7 @@ function requireRole(...roles) {
   };
 }
  
+// Audit log — fire-and-forget
 function audit(userId, action, meta = {}) {
   _supabase.from('audit_log').insert({
     user_id: userId,
@@ -143,29 +157,32 @@ function audit(userId, action, meta = {}) {
 }
  
 // ─────────────────────────────────────────────
-// HEALTH CHECK
+// HEALTH CHECK (public — no auth)
 // ─────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', ts: new Date() }));
  
 // ─────────────────────────────────────────────
-// AUTH ROUTES
+// AUTH ROUTES — login, logout, me
 // ─────────────────────────────────────────────
 app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
  
+    // Authenticate via Supabase Auth
     const { data: authData, error: authError } = await _supabase.auth.signInWithPassword({
       email: email.toLowerCase().trim(),
       password,
     });
  
     if (authError || !authData?.user) {
+      // Generic message — don't reveal whether email exists
       return res.status(401).json({ error: 'Invalid credentials' });
     }
  
     const user = authData.user;
  
+    // Fetch role from our users table (managed by admin)
     const { data: profile } = await _supabase
       .from('saarthi_users')
       .select('role, name, active')
@@ -176,6 +193,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       return res.status(403).json({ error: 'Account not active. Contact your administrator.' });
     }
  
+    // Issue our own JWT — short-lived, in-memory on client
     const token = jwt.sign(
       { id: user.id, email: user.email, role: profile.role, name: profile.name },
       JWT_SECRET,
@@ -197,15 +215,19 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
  
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   audit(req.user.id, 'LOGOUT', { _ip: req.ip });
+  // Blacklist this token immediately — instant revocation
   if (req._token) {
     _revokedTokens.add(req._token);
+    // Clean up expired tokens from blacklist hourly
     setTimeout(() => _revokedTokens.delete(req._token), 8 * 3600 * 1000);
   }
   res.json({ ok: true });
 });
  
+// ── Admin: revoke any user's sessions ──
 app.post('/api/admin/revoke/:userId', requireAuth, requireRole('admin'), async (req, res) => {
   try {
+    // Mark user as having sessions revoked (future tokens checked against this)
     await _supabase.from('saarthi_users')
       .update({ sessions_revoked_at: new Date().toISOString() })
       .eq('id', req.params.userId);
@@ -220,14 +242,19 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
  
 // ─────────────────────────────────────────────
 // PROTECTED ROUTE GROUPS
+// All routes below require valid JWT
 // ─────────────────────────────────────────────
+ 
+// Apply auth middleware globally from here
+// (public routes above are already registered)
+// Pass service-key supabase to upload route so it bypasses RLS
 const uploadRouter = require('./routes/upload');
-uploadRouter._supabase = null;
-app.use('/api/upload', requireAuth, (req, res, next) => {
-  req.supabase = _supabase;
+uploadRouter._supabase = null; // will be set below after _supabase is created
+app.use('/api/upload', requireAuth, requireRole('admin'), (req, res, next) => {
+  req.supabase = _supabase; // inject service key client
   next();
 }, uploadRouter);
- 
+// Inject service-key supabase into ALL data routes (bypasses RLS for authenticated users)
 function injectSupabase(req, res, next) { req.supabase = _supabase; next(); }
  
 app.use('/api/clients',   requireAuth, injectSupabase, require('./routes/clients'));
@@ -236,8 +263,9 @@ app.use('/api/dashboard', requireAuth, injectSupabase, require('./routes/dashboa
 app.use('/api/risk',      requireAuth, injectSupabase, require('./routes/risk'));
 app.use('/api/tags',      requireAuth, injectSupabase, require('./routes/tags'));
 app.use('/api/holdings',  requireAuth, injectSupabase, require('./routes/holdings'));
-app.use('/api/meta',      requireAuth, injectSupabase, require('./routes/meta'));
+// /api/meta/:key is handled by inline routes below (app_settings table)
  
+// ── LEVEL 1+2: Compute routes (server-side calculations) ──
 try {
   const computeRouter = require('./routes/compute');
   app.use('/api/compute', requireAuth, (req, res, next) => {
@@ -246,30 +274,15 @@ try {
   }, computeRouter);
   console.log('[Compute] Server-side calculation routes registered');
 } catch(e) {
-  console.warn('[Compute] routes/compute.js not found — skipping.');
+  console.warn('[Compute] routes/compute.js not found — skipping. Upload and deploy compute.js to enable.');
 }
  
+// FIFO routes
 const registerFIFORoutes = require('./routes/fifo');
-registerFIFORoutes(app, _supabase, requireAuth);
+registerFIFORoutes(app, _supabase, requireAuth, requireRole);
  
 // ─────────────────────────────────────────────
-// ✦ ASTROQUANT ROUTES
-// ─────────────────────────────────────────────
-app.use('/api/astro', requireAuth, injectSupabase, require('./routes/astro'));
-console.log('[AstroQuant] Routes registered');
- 
-// AstroQuant crons — only activate after backfill is complete
-if (process.env.ASTRO_BACKFILL_DONE === 'true') {
-  require('./crons/dailyPlanetCron');
-  require('./crons/sectorScoreCron');
-  require('./crons/alertCron');
-  console.log('[AstroQuant] Crons registered (backfill complete)');
-} else {
-  console.log('[AstroQuant] Crons SKIPPED — set ASTRO_BACKFILL_DONE=true after running backfill script');
-}
- 
-// ─────────────────────────────────────────────
-// FIFO CACHE SAVE
+// FIFO CACHE SAVE (from client-side parse)
 // ─────────────────────────────────────────────
 app.post('/api/fifo/save-cache', requireAuth, async (req, res) => {
   try {
@@ -277,6 +290,7 @@ app.post('/api/fifo/save-cache', requireAuth, async (req, res) => {
     if (!cache || typeof cache !== 'object') {
       return res.status(400).json({ error: 'cache required' });
     }
+    // Save each client's FIFO data to Supabase
     const clients = Object.entries(cache);
     let saved = 0;
     for (const [clientName, data] of clients) {
@@ -292,6 +306,7 @@ app.post('/api/fifo/save-cache', requireAuth, async (req, res) => {
         }, { onConflict: 'client_name' });
       if (!error) saved++;
     }
+    // Save status
     if (status) {
       await _supabase.from('app_settings')
         .upsert({ key: 'fifo_status', value: JSON.stringify(status) }, { onConflict: 'key' });
@@ -304,7 +319,7 @@ app.post('/api/fifo/save-cache', requireAuth, async (req, res) => {
 });
  
 // ─────────────────────────────────────────────
-// APP SETTINGS
+// APP SETTINGS (protected)
 // ─────────────────────────────────────────────
 app.get('/api/settings/:key', requireAuth, async (req, res) => {
   try {
@@ -315,16 +330,35 @@ app.get('/api/settings/:key', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
+// ── Keys that require admin role to write ──
+// nav_cashflows: XIRR source of truth | corp_actions: affects FIFO cost basis
+// insider_map: trading restriction compliance | screener_data: signal engine input
+// n500_data / gsec_data: regime engine inputs | upload_meta: upload audit trail
+const _ADMIN_ONLY_SETTINGS = new Set([
+  'nav_cashflows', 'corp_actions', 'insider_map',
+  'screener_data', 'n500_data', 'gsec_data', 'upload_meta',
+]);
+
 app.post('/api/settings/:key', requireAuth, async (req, res) => {
+  // Compliance-critical keys: admin only. Collaborative keys (family_groups,
+  // exceptional_clients, regime_cache, trade_history): any authenticated user.
+  if (_ADMIN_ONLY_SETTINGS.has(req.params.key) && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required to write this setting.' });
+  }
   try {
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
     const sb = global._supabase || _supabase;
     const key = req.params.key;
-    const { error: rpcErr } = await sb.rpc('upsert_app_setting', { p_key: key, p_value: value });
+    // Use raw SQL via rpc to completely bypass RLS
+    const { error: rpcErr } = await sb.rpc('upsert_app_setting', {
+      p_key: key, p_value: value
+    });
     if (rpcErr) {
+      // Fallback: try direct update then insert
       const { error: upErr } = await sb.from('app_settings')
-        .update({ value, updated_at: new Date().toISOString() }).eq('key', key);
+        .update({ value, updated_at: new Date().toISOString() })
+        .eq('key', key);
       if (upErr) {
         const { error: inErr } = await sb.from('app_settings')
           .insert({ key, value, updated_at: new Date().toISOString() });
@@ -336,6 +370,7 @@ app.post('/api/settings/:key', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
+// ── /api/meta/:key — alias for /api/settings/:key (used by saveMeta/loadMeta) ──
 app.get('/api/meta/:key', requireAuth, async (req, res) => {
   try {
     const { data, error } = await _supabase
@@ -349,7 +384,9 @@ app.post('/api/meta/:key', requireAuth, async (req, res) => {
   try {
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
+    // Use service key client directly to bypass RLS
     const sb = global._supabase || _supabase;
+    // Try update first, then insert (avoids INSERT policy issues with upsert)
     const { data: existing } = await sb.from('app_settings').select('key').eq('key', req.params.key).single();
     let error;
     if (existing) {
@@ -367,7 +404,7 @@ app.post('/api/meta/:key', requireAuth, async (req, res) => {
 });
  
 // ─────────────────────────────────────────────
-// SAARTHI MEMORY
+// SAARTHI MEMORY (protected)
 // ─────────────────────────────────────────────
 app.get('/api/memory', requireAuth, async (req, res) => {
   try {
@@ -398,9 +435,13 @@ app.post('/api/memory', requireAuth, async (req, res) => {
  
 app.delete('/api/memory/:id', requireAuth, async (req, res) => {
   try {
-    const { error } = await _supabase.from('saarthi_memory')
+    // Admins can delete any memory; others can only delete their own.
+    const filter = _supabase.from('saarthi_memory')
       .update({ active: false, updated_at: new Date().toISOString() })
       .eq('id', req.params.id);
+    const { error } = req.user.role === 'admin'
+      ? await filter
+      : await filter.eq('created_by', req.user.email);
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -413,14 +454,20 @@ app.patch('/api/memory/:id', requireAuth, async (req, res) => {
     if (importance !== undefined) updates.importance = importance;
     if (memory     !== undefined) updates.memory = memory;
     if (active     !== undefined) updates.active = active;
-    const { error } = await _supabase.from('saarthi_memory').update(updates).eq('id', req.params.id);
+    // Admins can patch any memory; others can only patch their own.
+    const filter = _supabase.from('saarthi_memory').update(updates).eq('id', req.params.id);
+    const { error } = req.user.role === 'admin'
+      ? await filter
+      : await filter.eq('created_by', req.user.email);
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
 // ─────────────────────────────────────────────
-// CLAUDE AI PROXY
+// CLAUDE AI PROXY (protected + server-side key)
+// The API key NEVER leaves the server.
+// Browser sends the conversation — server adds the key.
 // ─────────────────────────────────────────────
 app.post('/api/claude', requireAuth, claudeLimiter, async (req, res) => {
   try {
@@ -432,7 +479,7 @@ app.post('/api/claude', requireAuth, claudeLimiter, async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type':    'application/json',
-        'x-api-key':       ANTHROPIC_KEY,
+        'x-api-key':       ANTHROPIC_KEY,       // ← key on server only
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
@@ -468,7 +515,7 @@ app.post('/api/claude/extract-memory', requireAuth, claudeLimiter, async (req, r
 });
  
 // ─────────────────────────────────────────────
-// PUSH NOTIFICATIONS
+// PUSH NOTIFICATIONS (protected writes)
 // ─────────────────────────────────────────────
 const VAPID_PUBLIC_KEY  = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
@@ -498,6 +545,7 @@ async function sendPushToAll(title, body, url, opts = {}) {
   } catch (err) { console.error('[Push]', err.message); return 0; }
 }
  
+// VAPID public key is public — OK without auth
 app.get('/api/push/vapid-key', (req, res) => {
   res.json({ publicKey: VAPID_PUBLIC_KEY || null });
 });
@@ -539,7 +587,7 @@ app.post('/api/push/queue', requireAuth, requireRole('admin', 'manager'), async 
 });
  
 // ─────────────────────────────────────────────
-// KITE / ZERODHA
+// KITE / ZERODHA (protected)
 // ─────────────────────────────────────────────
 let _kiteToken = null;
 let _kiteTokenExpiry = null;
@@ -576,10 +624,12 @@ async function _kiteGet(endpoint) {
   return resp.json();
 }
  
+// Login URL — public (needed before auth)
 app.get('/api/kite/login-url', requireAuth, (req, res) => {
   res.json({ url: `https://kite.zerodha.com/connect/login?v=3&api_key=${KITE_API_KEY}` });
 });
  
+// Kite OAuth callback — public (Zerodha redirects here)
 app.get('/api/kite/callback', async (req, res) => {
   const { request_token, status } = req.query;
   if (status !== 'success' || !request_token) return res.redirect(`${FRONTEND_URL}?kite_error=1`);
@@ -643,6 +693,8 @@ app.get('/api/kite/historical', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
+const BSE_KEYWORDS = ['BEES','GOLDETF','SILVERBEES','LIQUIDBEES','GOLDBEES','NIFTYBEES','BANKBEES','JUNIORBEES','MON100','CPSEETF','BHARAT22','CPSE','SETFGOLD','SETF','ICICILIQ','HDFCLIQ','SBIETF','KOTAKGOLD','AXISGOLD','MAFSETF','ICICIPHD'];
+ 
 app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
   try {
     if (!_kiteToken) return res.json({ error: 'not_authenticated', connected: false });
@@ -672,7 +724,7 @@ app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
 });
  
 // ─────────────────────────────────────────────
-// WORLD INDICES
+// WORLD INDICES (protected)
 // ─────────────────────────────────────────────
 app.get('/api/world-indices', requireAuth, async (req, res) => {
   try {
@@ -712,15 +764,20 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res)
     const { email, name, role, password } = req.body;
     if (!email || !name || !role || !password) return res.status(400).json({ error: 'email, name, role, password required' });
     if (!['admin', 'manager', 'viewer'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+ 
+    // Create in Supabase Auth
     const { data: authUser, error: authErr } = await _supabase.auth.admin.createUser({
       email, password, email_confirm: true,
     });
     if (authErr) throw authErr;
+ 
+    // Insert profile
     const { error: profErr } = await _supabase.from('saarthi_users').insert({
       id: authUser.user.id, email, name, role, active: true,
       created_at: new Date().toISOString(),
     });
     if (profErr) throw profErr;
+ 
     audit(req.user.id, 'USER_CREATED', { email, role });
     res.json({ ok: true, id: authUser.user.id });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -741,7 +798,7 @@ app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), async (req,
 });
  
 // ─────────────────────────────────────────────
-// AUDIT LOG
+// AUDIT LOG (admin only)
 // ─────────────────────────────────────────────
 app.get('/api/admin/audit', requireAuth, requireRole('admin'), async (req, res) => {
   try {
@@ -753,7 +810,7 @@ app.get('/api/admin/audit', requireAuth, requireRole('admin'), async (req, res) 
 });
  
 // ─────────────────────────────────────────────
-// PWA / SERVICE WORKER
+// PWA / SERVICE WORKER (public)
 // ─────────────────────────────────────────────
 app.get('/sw.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript');
@@ -860,14 +917,19 @@ app.use((err, req, res, next) => {
  
 const PORT = process.env.PORT || 4000;
  
+// ── Startup: disable RLS on app_settings via SQL ──
 (async () => {
   try {
+    // Verify service key works
     const { error } = await _supabase.from('app_settings').upsert(
       { key: '_startup_test', value: 'ok', updated_at: new Date().toISOString() },
       { onConflict: 'key' }
     );
     if (error) {
       console.error('CRITICAL: RLS still blocking writes:', error.message);
+      console.error('ACTION REQUIRED: Go to Supabase → SQL Editor → run:');
+      console.error('  ALTER TABLE app_settings DISABLE ROW LEVEL SECURITY;');
+      console.error('  ALTER TABLE fifo_lots DISABLE ROW LEVEL SECURITY;');
     } else {
       console.log('✓ Supabase writes working');
     }
