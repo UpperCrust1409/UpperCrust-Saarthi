@@ -1722,6 +1722,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
       <div class="si" onclick="nav('perf')" id="n-perf"><span class="si-ico">◈</span><span>Performance</span></div>
       <div class="si" onclick="nav('smarttrade')" id="n-smarttrade"><span class="si-ico">🧠</span><span>Smart Trade</span> <span style="font-size:8px;padding:1px 5px;border-radius:5px;background:var(--gold);color:#fff;font-weight:700">NEW</span></div>
       <div class="si" onclick="nav('astroquant')" id="n-astroquant"><span class="si-ico">✦</span><span>AstroQuant</span><span class="si-badge am" id="aq-alert-badge" style="display:none">!</span></div>
+      <div class="si" onclick="nav('pulse')" id="n-pulse"><span class="si-ico">⚡</span><span>Saarthi Pulse</span></div>
       <div class="si" onclick="nav('alert')" id="n-alert"><span class="si-ico">👁</span><span>Bird's Eye View</span></div>
       <div class="si" onclick="nav('alpha')" id="n-alpha"><span class="si-ico">α</span><span>Alpha Tracker</span></div>
     </div>
@@ -7154,8 +7155,8 @@ function syncMobNav(page){
 }
 
 // ══ NAVIGATION ══
-const PT={upload:'Upload Portfolio',live:'Saarthi Live ⚡',picks:'Daily Picks 📅',ucp:'Universal Client Platform',dash:'Dashboard',risk:'Risk Monitor',family:'Family Portfolio View',health:'Portfolio Health & Hygiene',filters:'Risk Filters & Breach Engine',perf:'Performance',tags:'Tag Manager',conviction:'Conviction Tracker',clients:'Clients',stocks:'Stocks',sectors:'Sectors',trade:'Trade Engine',rebal:'Rebalancing',capital:'Capital Deploy',bulk:'Bulk Deploy',deploy:'Deployment Planner',scenario:'Scenarios',attribution:'P&L Attribution',onboard:'Client Onboarding',alert:'Bird\'s Eye View',invest:'Investment Breakup',alpha:'Alpha Tracker',tradelog:'Trade History',benchmark:'Benchmark',comms:'Client Communications',bullion:'Bullion Tracker',tax:'Tax Dashboard',prospect:'Prospecting & Marketing',smarttrade:'Smart Trade · Bespoke Intelligence',astroquant:'AstroQuant · Planetary Intelligence'};
-const PS={ucp:'Client Intelligence Hub · All modules in one place · Decision OS',family:'Aggregate multiple client portfolios — combined AUM, sector view, overlap analysis',risk:'Live breach monitor · Stock & sector limit enforcement · Gold 40% · Silver 20% · PGINVIT 20% · All others 15% · Sector limits in Tag Manager',health:'Health = performance quality · Hygiene = risk quality · Score out of 100',filters:'Define custom rules, monitor breaches, get corrective suggestions',upload:'Import portfolio file',dash:'Decisions · Alerts · Portfolio overview',perf:'Client XIRR · Top performers · Laggards by time period',tags:'Manage sector tags — single source of truth for all modules',conviction:'Top 20 high-conviction stocks — penetration across all clients',clients:'Client portfolio deep-dive',stocks:'Stock-level exposure',sectors:'Sector allocation with drill-down',sim:'Simulate before you act',trade:'4-strategy intelligent allocation',rebal:'Detect drift · Generate trades',capital:'AI-scored deployment opportunities',bulk:'Multi-stock budget deployment',deploy:'Set allocation targets · See qty + cash needed per stock per client',scenario:'Market stress testing',attribution:'What drove returns — stock & sector contribution',onboard:'Model portfolio for new client at any corpus size',tradelog:'Full audit trail of all recorded trades · exportable',alpha:'Daily NAV vs Benchmark · Wealth Fund only',invest:'Client-wise capital breakdown — initial · additional · other income · AUM',alert:'Sector breaches · Stock limits · Underperformers · Cash alerts · What\'s working',benchmark:'Portfolio vs Nifty · Alpha tracking',comms:'Auto-generate quarterly review emails & reports',bullion:'Track Gold & Silver allocation — 65:35 profit-shift rule across all clients',tax:'Per-client FIFO tax lots · STCG/LTCG exposure · First Buy price · Lot-by-lot gain calculation',astroquant:'Planetary cycles × Indian market history · Scores, backtests, research'};
+const PT={upload:'Upload Portfolio',live:'Saarthi Live ⚡',picks:'Daily Picks 📅',ucp:'Universal Client Platform',dash:'Dashboard',risk:'Risk Monitor',family:'Family Portfolio View',health:'Portfolio Health & Hygiene',filters:'Risk Filters & Breach Engine',perf:'Performance',tags:'Tag Manager',conviction:'Conviction Tracker',clients:'Clients',stocks:'Stocks',sectors:'Sectors',trade:'Trade Engine',rebal:'Rebalancing',capital:'Capital Deploy',bulk:'Bulk Deploy',deploy:'Deployment Planner',scenario:'Scenarios',attribution:'P&L Attribution',onboard:'Client Onboarding',alert:'Bird\'s Eye View',invest:'Investment Breakup',alpha:'Alpha Tracker',tradelog:'Trade History',benchmark:'Benchmark',comms:'Client Communications',bullion:'Bullion Tracker',tax:'Tax Dashboard',prospect:'Prospecting & Marketing',smarttrade:'Smart Trade · Bespoke Intelligence',astroquant:'AstroQuant · Planetary Intelligence',pulse:'Saarthi Pulse · Daily Intelligence Briefing'};
+const PS={ucp:'Client Intelligence Hub · All modules in one place · Decision OS',family:'Aggregate multiple client portfolios — combined AUM, sector view, overlap analysis',risk:'Live breach monitor · Stock & sector limit enforcement · Gold 40% · Silver 20% · PGINVIT 20% · All others 15% · Sector limits in Tag Manager',health:'Health = performance quality · Hygiene = risk quality · Score out of 100',filters:'Define custom rules, monitor breaches, get corrective suggestions',upload:'Import portfolio file',dash:'Decisions · Alerts · Portfolio overview',perf:'Client XIRR · Top performers · Laggards by time period',tags:'Manage sector tags — single source of truth for all modules',conviction:'Top 20 high-conviction stocks — penetration across all clients',clients:'Client portfolio deep-dive',stocks:'Stock-level exposure',sectors:'Sector allocation with drill-down',sim:'Simulate before you act',trade:'4-strategy intelligent allocation',rebal:'Detect drift · Generate trades',capital:'AI-scored deployment opportunities',bulk:'Multi-stock budget deployment',deploy:'Set allocation targets · See qty + cash needed per stock per client',scenario:'Market stress testing',attribution:'What drove returns — stock & sector contribution',onboard:'Model portfolio for new client at any corpus size',tradelog:'Full audit trail of all recorded trades · exportable',alpha:'Daily NAV vs Benchmark · Wealth Fund only',invest:'Client-wise capital breakdown — initial · additional · other income · AUM',alert:'Sector breaches · Stock limits · Underperformers · Cash alerts · What\'s working',benchmark:'Portfolio vs Nifty · Alpha tracking',comms:'Auto-generate quarterly review emails & reports',bullion:'Track Gold & Silver allocation — 65:35 profit-shift rule across all clients',tax:'Per-client FIFO tax lots · STCG/LTCG exposure · First Buy price · Lot-by-lot gain calculation',astroquant:'Planetary cycles × Indian market history · Scores, backtests, research',pulse:'Daily fund manager briefing · Pick accountability · Portfolio health · Client flags · AstroQuant accuracy · Market context'};
 
 
 
@@ -8826,11 +8827,11 @@ function nav(page){
   syncMobNav(page);
   if(page==='upload'){renderUpload(el);return;}
   if(!Object.keys(DB.clients).length){
-    if(page==='astroquant'){renderAstroQuant(el);return;}
+    if(page==='astroquant'||page==='pulse'){renderAstroQuant(el);return;}
     el.innerHTML=`<div class="empty"><div class="empty-ico">📊</div><div style="font-size:14px;font-weight:600;margin-bottom:6px;color:var(--ink2)">No portfolio loaded</div><div style="color:var(--ink3);margin-bottom:18px;font-size:12px">Upload an Excel file to begin</div><button class="btn btn-gold" onclick="nav('upload')" style="margin:0 auto;display:flex">Upload Portfolio</button></div>`;
     return;
   }
-  const M={live:renderLive,picks:renderPicks,dash:renderDash,ucp:renderUCP,perf:renderPerf,family:renderFamily,health:renderHealth,filters:renderFilters,tags:renderTags,conviction:renderConviction,clients:renderClients,stocks:renderStocks,sectors:renderSectors,sim:renderSim,trade:renderTrade,scenario:renderScenario,attribution:renderAttribution,onboard:renderOnboard,alert:renderAlert,benchmark:renderBenchmark,comms:renderComms,bullion:renderBullion,invest:renderInvestBreakup,alpha:renderAlphaTracker,tradelog:renderTradeLog,tax:renderTaxDashboard,prospect:renderProspecting,smarttrade:renderSmartTrade,astroquant:renderAstroQuant};
+  const M={live:renderLive,picks:renderPicks,dash:renderDash,ucp:renderUCP,perf:renderPerf,family:renderFamily,health:renderHealth,filters:renderFilters,tags:renderTags,conviction:renderConviction,clients:renderClients,stocks:renderStocks,sectors:renderSectors,sim:renderSim,trade:renderTrade,scenario:renderScenario,attribution:renderAttribution,onboard:renderOnboard,alert:renderAlert,benchmark:renderBenchmark,comms:renderComms,bullion:renderBullion,invest:renderInvestBreakup,alpha:renderAlphaTracker,tradelog:renderTradeLog,tax:renderTaxDashboard,prospect:renderProspecting,smarttrade:renderSmartTrade,astroquant:renderAstroQuant,pulse:renderPulse};
   if(M[page]){
     try{
       const _renderResult = M[page](el);
@@ -33845,6 +33846,567 @@ async function aqAskQuestion(preset) {
 (async function _aqInitBadge(){
   try{const {alerts=[]}=await(await aqFetch('/api/astro/alerts')).json();const b=document.getElementById('aq-alert-badge');if(b&&alerts.length){b.style.display='inline';b.textContent=alerts.length;}}catch(e){}
 })();
+
+
+// ═══ SAARTHI PULSE MODULE ═══
+// ═══════════════════════════════════════════════════════════════
+// SAARTHI PULSE — Frontend Module
+// The daily intelligence briefing for the fund manager
+// ═══════════════════════════════════════════════════════════════
+
+// ── State ────────────────────────────────────────────────────────
+const PULSE = { tab: 'overview', data: null, loading: false };
+
+// ── Constants ────────────────────────────────────────────────────
+const PULSE_FUND_BENCH = { UCWF: 'BSE 500', UCGF: 'BSE 500', UCPF: 'BSE 500' };
+const PULSE_FLAG_META = {
+  CONCENTRATION: { icon: '⚠', label: 'Concentration', color: 'var(--red)' },
+  UNDERPERFORM:  { icon: '📉', label: 'Underperformance', color: 'var(--red)' },
+  CASH_IDLE:     { icon: '💰', label: 'Idle Cash', color: 'var(--amber)' },
+  HIGH_PE:       { icon: '📊', label: 'High PE Exposure', color: 'var(--amber)' },
+  STALE:         { icon: '🕰', label: 'No Activity', color: 'var(--amber)' },
+  SIP_LAPSE:     { icon: '🔔', label: 'SIP Risk', color: 'var(--red)' },
+};
+
+const PULSE_TABS = [
+  { id: 'overview',   label: '◉ Overview' },
+  { id: 'picks',      label: '🎯 Pick Accountability' },
+  { id: 'portfolio',  label: '📊 Portfolio Health' },
+  { id: 'clients',    label: '🧑‍💼 Client Flags' },
+  { id: 'astro',      label: '🪐 AstroQuant Track' },
+  { id: 'market',     label: '📈 Market Context' },
+];
+
+// ── Helpers ──────────────────────────────────────────────────────
+function pls(n, d=2) { if(n==null||isNaN(n)) return '—'; return (n>=0?'+':'')+n.toFixed(d)+'%'; }
+function pct(n,d=1) { if(n==null||isNaN(n)) return '—'; return n.toFixed(d)+'%'; }
+function crore(n) { if(!n) return '—'; return '₹'+(n/10000000).toFixed(2)+' Cr'; }
+function scoreColor(s) { return s>=70?'var(--green)':s>=45?'var(--amber)':'var(--red)'; }
+function scoreBg(s) { return s>=70?'var(--grn2)':s>=45?'var(--amb2)':'var(--red2)'; }
+function bucketColor(b) { return {A:'var(--green)',B:'var(--amber)',C:'var(--red)',E:'var(--ink4)'}[b]||'var(--ink4)'; }
+
+function pulseKpi(label, value, sub, subColor) {
+  return `<div class="kc" style="text-align:center">
+    <div class="kc-lbl">${label}</div>
+    <div class="kc-val" style="font-size:22px;font-weight:700">${value}</div>
+    ${sub?`<div class="kc-sub" style="color:${subColor||'var(--ink4)'};">${sub}</div>`:''}
+  </div>`;
+}
+
+function pulseBadge(label, color) {
+  const bg = color==='var(--green)'?'var(--grn2)':color==='var(--red)'?'var(--red2)':color==='var(--amber)'?'var(--amb2)':'var(--sur3)';
+  return `<span style="font-size:9px;font-weight:700;color:${color};background:${bg};padding:2px 7px;border-radius:10px;white-space:nowrap">${label}</span>`;
+}
+
+function winRateBar(rate) {
+  if(rate==null) return '<span style="color:var(--ink4);font-size:11px">No data yet</span>';
+  const c = rate>=60?'var(--green)':rate>=45?'var(--amber)':'var(--red)';
+  return `<div style="display:flex;align-items:center;gap:8px">
+    <div style="flex:1;height:8px;background:var(--sur3);border-radius:4px;overflow:hidden">
+      <div style="height:100%;width:${Math.min(rate,100)}%;background:${c};border-radius:4px;transition:width .5s"></div>
+    </div>
+    <span style="font-size:12px;font-weight:700;color:${c};min-width:36px">${rate?.toFixed(1)}%</span>
+  </div>`;
+}
+
+function deltaChip(curr, prev, label) {
+  if(curr==null||prev==null) return '';
+  const d = curr-prev;
+  const c = d>0?'var(--green)':d<0?'var(--red)':'var(--ink4)';
+  return `<span style="font-size:10px;color:${c};font-weight:600">${d>0?'▲':'▼'} ${Math.abs(d).toFixed(1)} vs ${label}</span>`;
+}
+
+// ── Main render ──────────────────────────────────────────────────
+async function renderPulse(el) {
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:20px;font-weight:700;color:var(--ink);letter-spacing:-0.3px">Saarthi <span style="color:var(--gold)">Pulse</span></div>
+        <div style="font-size:11px;color:var(--ink4);margin-top:2px">Daily intelligence briefing · ${dateStr}</div>
+      </div>
+      <button onclick="renderPulse(document.getElementById('pg'))" style="font-size:11px;padding:6px 14px;border:1.5px solid var(--bdr);border-radius:var(--r);background:var(--sur);cursor:pointer;color:var(--ink3)">↻ Refresh</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;overflow-x:auto;padding-bottom:4px">
+      ${PULSE_TABS.map(t=>`<button onclick="pulseSetTab('${t.id}')" id="plt-${t.id}"
+        style="padding:6px 14px;border-radius:20px;border:1.5px solid ${PULSE.tab===t.id?'var(--gold)':'var(--bdr)'};
+        background:${PULSE.tab===t.id?'var(--glt)':'var(--sur)'};color:${PULSE.tab===t.id?'var(--gold3)':'var(--ink3)'};
+        font-size:11px;font-weight:${PULSE.tab===t.id?700:500};cursor:pointer;white-space:nowrap">${t.label}</button>`).join('')}
+    </div>
+    <div id="pulse-body"><div style="padding:40px;text-align:center"><div class="spin"></div><div style="margin-top:10px;font-size:11px;color:var(--ink4)">Loading intelligence report…</div></div></div>`;
+
+  await pulseLoadData();
+  await pulseRenderTab(document.getElementById('pulse-body'));
+}
+
+function pulseSetTab(tab) {
+  PULSE.tab = tab;
+  PULSE_TABS.forEach(t => {
+    const btn = document.getElementById(`plt-${t.id}`); if(!btn) return;
+    const on = t.id === tab;
+    btn.style.borderColor = on?'var(--gold)':'var(--bdr)';
+    btn.style.background  = on?'var(--glt)':'var(--sur)';
+    btn.style.color       = on?'var(--gold3)':'var(--ink3)';
+    btn.style.fontWeight  = on?'700':'500';
+  });
+  pulseRenderTab(document.getElementById('pulse-body'));
+}
+
+async function pulseLoadData() {
+  try {
+    const r = await authFetch(KITE_BACKEND+'/api/pulse/report');
+    PULSE.data = await r.json();
+  } catch(e) {
+    console.error('[Pulse] Load error:', e.message);
+    PULSE.data = null;
+  }
+}
+
+async function pulseRenderTab(el) {
+  if(!el) return;
+  if(!PULSE.data) {
+    el.innerHTML = `<div style="padding:30px;background:var(--amb2);border:1.5px solid var(--ambbdr);border-radius:var(--r);color:var(--amber);font-size:12px">
+      No pulse data yet. The daily cron runs at 6:15 AM IST. To generate now, run the pulse cron manually from Railway.
+      <div style="margin-top:8px;font-size:11px;color:var(--ink4)">Note: Pick performance tracking starts once picks are logged daily.</div>
+    </div>`;
+    return;
+  }
+  try {
+    if(PULSE.tab==='overview')  pulseRenderOverview(el);
+    else if(PULSE.tab==='picks') pulseRenderPicks(el);
+    else if(PULSE.tab==='portfolio') pulseRenderPortfolio(el);
+    else if(PULSE.tab==='clients') pulseRenderClients(el);
+    else if(PULSE.tab==='astro') pulseRenderAstro(el);
+    else if(PULSE.tab==='market') pulseRenderMarket(el);
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--red);padding:14px">${e.message}</div>`;
+  }
+}
+
+// ══ TAB 1 — OVERVIEW ═══════════════════════════════════════════
+function pulseRenderOverview(el) {
+  const d = PULSE.data;
+  const m = d.meta || {};
+  const p = d.picks || {};
+  const f = d.funds || {};
+  const c = d.clients || {};
+
+  const todayFunds = f.today || [];
+  const ucwf = todayFunds.find(x=>x.fund==='UCWF') || {};
+  const ucgf = todayFunds.find(x=>x.fund==='UCGF') || {};
+  const ucpf = todayFunds.find(x=>x.fund==='UCPF') || {};
+
+  const ucwf7 = (f.d7||[]).find(x=>x.fund==='UCWF') || {};
+  const ucwf30 = (f.d30||[]).find(x=>x.fund==='UCWF') || {};
+
+  const flags = c.flags || [];
+  const highFlags = flags.filter(f=>f.severity==='HIGH');
+  const bkt = c.bucketToday || {};
+  const bkt7d = c.bucket7d || {};
+
+  el.innerHTML = `
+    <!-- Header KPIs -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:16px">
+      ${pulseKpi('Pick Win Rate (7d)', m.pick_win_rate_7d!=null?pct(m.pick_win_rate_7d):'—',
+        m.pick_win_rate_30d!=null?'30d: '+pct(m.pick_win_rate_30d):'No data yet',
+        m.pick_win_rate_7d>=60?'var(--green)':m.pick_win_rate_7d>=45?'var(--amber)':'var(--red)')}
+      ${pulseKpi('Fund Score (UCWF)', ucwf.total_score!=null?ucwf.total_score.toFixed(1):'—',
+        ucwf7.total_score!=null?deltaChip(ucwf.total_score,ucwf7.total_score,'7d'):'',
+        scoreColor(ucwf.total_score||0))}
+      ${pulseKpi('Clients Flagged', m.clients_flagged!=null?m.clients_flagged:'—',
+        highFlags.length?highFlags.length+' HIGH priority':'All clear', highFlags.length?'var(--red)':'var(--green)')}
+      ${pulseKpi("Today's Picks", p.today?.length||0, p.today?.length?'Live picks logged':'Generate picks first','var(--ink3)')}
+    </div>
+
+    <!-- Three column layout: Fund scores | Picks performance | Client buckets -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+
+      <!-- Fund score card -->
+      <div class="panel">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink4);margin-bottom:10px">Fund Health Score</div>
+        ${[{fund:'UCWF',data:ucwf,prev:ucwf7,label:'Wealth Fund'},{fund:'UCGF',data:ucgf,label:'Growth Fund'},{fund:'UCPF',data:ucpf,label:'Prosperity Fund'}].map(({fund,data,prev,label})=>`
+          <div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <span style="font-size:11px;font-weight:600;color:var(--ink2)">${label}</span>
+              <span style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:${scoreColor(data.total_score||0)}">${data.total_score!=null?data.total_score.toFixed(1):'—'}</span>
+            </div>
+            <div style="height:6px;background:var(--sur3);border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:${Math.min(data.total_score||0,100)}%;background:${scoreColor(data.total_score||0)};border-radius:3px;transition:width .5s"></div>
+            </div>
+            <div style="font-size:9px;color:var(--ink4);margin-top:3px">H: ${data.health_score||'—'} / Hygiene: ${data.hygiene_score||'—'} · vs ${PULSE_FUND_BENCH[fund]}</div>
+          </div>`).join('')}
+      </div>
+
+      <!-- Pick performance -->
+      <div class="panel">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink4);margin-bottom:10px">Pick Accountability</div>
+        ${[{label:'Last 7 days',wr:p.winRate7d},{label:'Last 30 days',wr:p.winRate30d},{label:'Last 180 days',wr:p.winRate180d}].map(({label,wr})=>`
+          <div style="margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:11px;color:var(--ink3)">${label}</span>
+              <span style="font-size:10px;color:var(--ink4)">${wr?wr.n+' picks':'—'}</span>
+            </div>
+            ${wr?winRateBar(wr.rate):'<span style="color:var(--ink4);font-size:11px">No closed picks yet</span>'}
+            ${wr?`<div style="font-size:9px;color:var(--ink4);margin-top:2px">Avg return: <span style="color:${wr.avgReturn>=0?'var(--green)':'var(--red)';font-weight:600}">${pls(wr.avgReturn)}</span></div>`:''}
+          </div>`).join('')}
+      </div>
+
+      <!-- Client buckets -->
+      <div class="panel">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink4);margin-bottom:10px">Client Bucket Movement</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          ${['A','B','C','E'].map(b=>`
+            <div style="background:${b==='A'?'var(--grn2)':b==='C'?'var(--red2)':b==='B'?'var(--amb2)':'var(--sur3)'};border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:700;color:${bucketColor(b)}">${bkt[b]||0}</div>
+              <div style="font-size:9px;font-weight:700;color:${bucketColor(b)}">${b==='A'?'Best':b==='B'?'On Track':b==='C'?'At Risk':'Exception'}</div>
+              <div style="font-size:9px;color:var(--ink4);margin-top:2px">${bkt7d[b]!=null?deltaChip(bkt[b]||0,bkt7d[b]||0,'7d'):''}</div>
+            </div>`).join('')}
+        </div>
+        <div style="margin-top:10px">
+          <div style="font-size:9px;font-weight:700;color:var(--ink4);margin-bottom:6px">TOP FLAGS TODAY</div>
+          ${flags.slice(0,3).map(f=>{const m=PULSE_FLAG_META[f.flag_type]||{};return `
+            <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--bdr)">
+              <span style="font-size:14px">${m.icon||'⚠'}</span>
+              <div style="flex:1">
+                <div style="font-size:10px;font-weight:600;color:var(--ink)">${f.client_name?.split('(')[0]?.trim()}</div>
+                <div style="font-size:9px;color:var(--ink4)">${f.detail?.slice(0,55)}${f.detail?.length>55?'…':''}</div>
+              </div>
+              ${pulseBadge(f.severity,f.severity==='HIGH'?'var(--red)':'var(--amber)')}
+            </div>`}).join('')}
+          ${!flags.length?'<div style="font-size:11px;color:var(--green);text-align:center;padding:10px">✓ No flags today</div>':''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Today's picks quick view -->
+    ${p.today?.length?`
+      <div class="tbl">
+        <div class="tbl-hd"><span class="tbl-ht">🎯 Today's Picks — ${p.today.length} stocks</span></div>
+        <table><thead><tr><th>Symbol</th><th>Company</th><th>Signal</th><th>Fund</th><th>Sector</th><th>Rationale</th></tr></thead>
+        <tbody>${p.today.map(pk=>`<tr>
+          <td style="font-family:var(--font-mono);font-weight:700">${pk.symbol}</td>
+          <td style="font-size:11px">${pk.company_name||'—'}</td>
+          <td>${pulseBadge(pk.signal_type||'BUY',pk.signal_type==='SELL'?'var(--red)':'var(--green)')}</td>
+          <td style="font-size:11px">${pk.fund||'—'}</td>
+          <td style="font-size:11px;color:var(--ink3)">${pk.sector||'—'}</td>
+          <td style="font-size:10px;color:var(--ink3);max-width:200px">${(pk.rationale||'—').slice(0,80)}${(pk.rationale||'').length>80?'…':''}</td>
+        </tr>`).join('')}</tbody></table>
+      </div>`:
+      `<div class="panel" style="text-align:center;padding:24px;color:var(--ink4)">
+        <div style="font-size:13px;font-weight:600;color:var(--ink3);margin-bottom:4px">No picks logged today</div>
+        <div style="font-size:11px">Picks are auto-logged when generated by Saarthi Live</div>
+      </div>`}`;
+}
+
+// ══ TAB 2 — PICK ACCOUNTABILITY ═════════════════════════════════
+function pulseRenderPicks(el) {
+  const p = PULSE.data?.picks || {};
+  const perfs = p.perf30d || [];
+  const closed = perfs.filter(x=>x.outcome!=='OPEN');
+  const open   = perfs.filter(x=>x.outcome==='OPEN');
+
+  // Group by sector
+  const bySector = {};
+  closed.forEach(p => {
+    const sec = p.pulse_picks_log?.sector || 'Unknown';
+    if(!bySector[sec]) bySector[sec]={hits:0,total:0,totalReturn:0};
+    bySector[sec].total++;
+    bySector[sec].totalReturn += p.return_pct||0;
+    if(p.return_pct>0) bySector[sec].hits++;
+  });
+
+  el.innerHTML = `
+    <!-- Summary row -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px">
+      ${pulseKpi('Win Rate (7d)', p.winRate7d?pct(p.winRate7d.rate):'—', p.winRate7d?p.winRate7d.n+' picks':'', p.winRate7d?.rate>=60?'var(--green)':p.winRate7d?.rate>=45?'var(--amber)':'var(--red)')}
+      ${pulseKpi('Win Rate (30d)', p.winRate30d?pct(p.winRate30d.rate):'—', p.winRate30d?p.winRate30d.n+' picks':'', p.winRate30d?.rate>=60?'var(--green)':p.winRate30d?.rate>=45?'var(--amber)':'var(--red)')}
+      ${pulseKpi('Avg Return (30d)', p.winRate30d?pls(p.winRate30d.avgReturn):'—', 'on closed picks', p.winRate30d?.avgReturn>=0?'var(--green)':'var(--red)')}
+      ${pulseKpi('Open Picks', open.length,'Awaiting closure','var(--ink3)')}
+    </div>
+
+    <!-- Sector breakdown -->
+    ${Object.keys(bySector).length?`
+      <div class="panel" style="margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink4);margin-bottom:10px">Sector Win Rate (30d)</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">
+          ${Object.entries(bySector).sort((a,b)=>b[1].hits/b[1].total-a[1].hits/a[1].total).map(([sec,s])=>{
+            const rate=s.hits/s.total*100;
+            const avgRet=s.totalReturn/s.total*100;
+            return `<div style="background:var(--sur3);border-radius:8px;padding:10px 12px">
+              <div style="font-size:11px;font-weight:600;color:var(--ink);margin-bottom:6px">${sec}</div>
+              ${winRateBar(rate)}
+              <div style="font-size:9px;color:var(--ink4);margin-top:3px">${s.hits}/${s.total} hits · avg ${pls(avgRet)}</div>
+            </div>`;}).join('')}
+        </div>
+      </div>`:''  }
+
+    <!-- Full pick log -->
+    <div class="tbl">
+      <div class="tbl-hd"><span class="tbl-ht">All Picks — Last 30 Days (${perfs.length})</span></div>
+      <div style="overflow-x:auto">
+      <table style="min-width:700px"><thead><tr>
+        <th>Pick Date</th><th>Symbol</th><th>Fund</th><th>Entry</th><th>Current</th>
+        <th style="text-align:right">Return</th><th>Days</th><th>Status</th>
+      </tr></thead>
+      <tbody>${perfs.length?perfs.map(p=>`<tr>
+        <td style="font-family:var(--font-mono);font-size:11px">${p.pick_date}</td>
+        <td style="font-weight:700">${p.symbol}</td>
+        <td style="font-size:11px">${p.pulse_picks_log?.fund||'—'}</td>
+        <td style="font-family:var(--font-mono);font-size:11px">₹${(p.entry_price||0).toFixed(0)}</td>
+        <td style="font-family:var(--font-mono);font-size:11px">₹${(p.current_price||0).toFixed(0)}</td>
+        <td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:${(p.return_pct||0)>=0?'var(--green)':'var(--red)'}">${pls((p.return_pct||0)*100)}</td>
+        <td style="font-size:11px;color:var(--ink4)">${p.holding_days}d</td>
+        <td>${pulseBadge(p.outcome||'OPEN',p.outcome==='HIT'?'var(--green)':p.outcome==='MISS'?'var(--red)':'var(--ink3)')}</td>
+      </tr>`).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--ink4);padding:20px">No picks logged yet — picks are tracked automatically each morning</td></tr>'}</tbody></table>
+      </div>
+    </div>`;
+}
+
+// ══ TAB 3 — PORTFOLIO HEALTH ════════════════════════════════════
+function pulseRenderPortfolio(el) {
+  const f = PULSE.data?.funds || {};
+  const today = f.today || [];
+  const d7   = f.d7 || [];
+  const d30  = f.d30 || [];
+  const d180 = f.d180 || [];
+
+  const funds = ['UCWF','UCGF','UCPF'];
+  const fundNames = { UCWF:'Wealth Fund', UCGF:'Growth Fund', UCPF:'Prosperity Fund' };
+
+  el.innerHTML = `
+    <!-- Fund score comparison grid -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-bottom:16px">
+      ${funds.map(fund=>{
+        const t  = today.find(x=>x.fund===fund)||{};
+        const w7 = d7.find(x=>x.fund===fund)||{};
+        const w30= d30.find(x=>x.fund===fund)||{};
+        const w180=d180.find(x=>x.fund===fund)||{};
+        const sc = t.total_score||0;
+        return `<div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:var(--ink)">${fundNames[fund]}</div>
+              <div style="font-size:10px;color:var(--ink4)">${fund} · vs ${PULSE_FUND_BENCH[fund]}</div>
+            </div>
+            <div style="font-family:var(--font-mono);font-size:28px;font-weight:700;color:${scoreColor(sc)}">${sc.toFixed(1)}</div>
+          </div>
+          <div style="height:8px;background:var(--sur3);border-radius:4px;overflow:hidden;margin-bottom:12px">
+            <div style="height:100%;width:${Math.min(sc,100)}%;background:${scoreColor(sc)};border-radius:4px;transition:width .6s"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div style="background:${scoreBg(t.health_score||0)};border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:16px;font-weight:700;color:${scoreColor(t.health_score||0)}">${t.health_score?.toFixed(1)||'—'}</div>
+              <div style="font-size:9px;color:var(--ink4)">Health /50</div>
+            </div>
+            <div style="background:${scoreBg(t.hygiene_score||0)};border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:16px;font-weight:700;color:${scoreColor(t.hygiene_score||0)}">${t.hygiene_score?.toFixed(1)||'—'}</div>
+              <div style="font-size:9px;color:var(--ink4)">Hygiene /50</div>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--ink4)">
+            <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--bdr)">
+              <span>7 days ago</span><span style="color:${w7.total_score?scoreColor(w7.total_score):'var(--ink4)'}">${w7.total_score?.toFixed(1)||'—'} ${deltaChip(sc,w7.total_score,'')}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--bdr)">
+              <span>30 days ago</span><span>${w30.total_score?.toFixed(1)||'—'} ${deltaChip(sc,w30.total_score,'')}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:3px 0">
+              <span>180 days ago</span><span>${w180.total_score?.toFixed(1)||'—'} ${deltaChip(sc,w180.total_score,'')}</span>
+            </div>
+          </div>
+        </div>`;}).join('')}
+    </div>
+
+    <div style="padding:10px 14px;background:var(--glt);border:1px solid var(--gbdr);border-radius:var(--r);font-size:11px;color:var(--gold3)">
+      📌 <b>Scoring:</b> Health = return quality vs benchmark (0–50) · Hygiene = risk quality (diversification, concentration, breaches) (0–50) · Total = 100 · Scores snapshot daily at 6:15 AM IST
+    </div>`;
+}
+
+// ══ TAB 4 — CLIENT FLAGS ════════════════════════════════════════
+function pulseRenderClients(el) {
+  const c = PULSE.data?.clients || {};
+  const flags = c.flags || [];
+  const bkt = c.bucketToday || {};
+  const bkt7d = c.bucket7d || {};
+  const bkt30d = c.bucket30d || {};
+
+  // Group flags by client
+  const byClient = {};
+  flags.forEach(f => {
+    if(!byClient[f.client_name]) byClient[f.client_name] = [];
+    byClient[f.client_name].push(f);
+  });
+
+  // Sort: HIGH severity first
+  const sorted = Object.entries(byClient).sort((a,b)=>{
+    const aH = a[1].some(f=>f.severity==='HIGH')?0:1;
+    const bH = b[1].some(f=>f.severity==='HIGH')?0:1;
+    return aH-bH;
+  });
+
+  el.innerHTML = `
+    <!-- Bucket movement table -->
+    <div class="panel" style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink4);margin-bottom:12px">Client Bucket Distribution — Movement Tracker</div>
+      <div style="overflow-x:auto">
+      <table style="width:100%"><thead><tr>
+        <th>Bucket</th><th>Meaning</th><th style="text-align:center">Today</th><th style="text-align:center">7d ago</th><th style="text-align:center">30d ago</th><th style="text-align:center">Change (30d)</th>
+      </tr></thead>
+      <tbody>
+        ${[{b:'A',m:'Best — compounding, top quartile'},{b:'B',m:'On track — near/above benchmark'},{b:'C',m:'At risk — below benchmark'},{b:'E',m:'Exception — portfolio < 6 months'}].map(({b,m})=>`
+          <tr>
+            <td style="font-weight:700;color:${bucketColor(b)};font-size:13px">${b}</td>
+            <td style="font-size:11px;color:var(--ink3)">${m}</td>
+            <td style="text-align:center;font-weight:700;font-size:16px;color:${bucketColor(b)}">${bkt[b]||0}</td>
+            <td style="text-align:center;font-size:12px;color:var(--ink4)">${bkt7d[b]||0}</td>
+            <td style="text-align:center;font-size:12px;color:var(--ink4)">${bkt30d[b]||0}</td>
+            <td style="text-align:center;font-size:12px">
+              ${deltaChip(bkt[b]||0, bkt30d[b]||0, '30d')}
+            </td>
+          </tr>`).join('')}
+      </tbody></table>
+      </div>
+    </div>
+
+    <!-- Client flags -->
+    <div class="tbl" style="margin-bottom:14px">
+      <div class="tbl-hd">
+        <span class="tbl-ht">⚠ Clients Needing Attention — ${flags.length} flags today</span>
+        <span style="font-size:10px;color:var(--ink4)">${flags.filter(f=>f.severity==='HIGH').length} HIGH priority</span>
+      </div>
+      ${!sorted.length?'<div style="padding:20px;text-align:center;color:var(--green)">✓ No client flags today — all portfolios healthy</div>':
+        sorted.map(([client, cflags])=>`
+          <div style="padding:12px 14px;border-bottom:1px solid var(--bdr)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div style="font-size:12px;font-weight:700;color:var(--ink)">${client.split('(')[0].trim()}</div>
+              <div style="display:flex;gap:4px">
+                ${cflags.filter(f=>f.severity==='HIGH').length?pulseBadge('HIGH',cflags.filter(f=>f.severity==='HIGH').length+' flags','var(--red)'):''}
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              ${cflags.map(f=>{const m=PULSE_FLAG_META[f.flag_type]||{};return `
+                <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 10px;background:${f.severity==='HIGH'?'var(--red2)':'var(--amb2)'};border-radius:6px">
+                  <span style="font-size:14px">${m.icon||'⚠'}</span>
+                  <div style="flex:1">
+                    <div style="font-size:10px;font-weight:700;color:${f.severity==='HIGH'?'var(--red)':'var(--amber)'}">${m.label||f.flag_type}</div>
+                    <div style="font-size:11px;color:var(--ink2)">${f.detail}</div>
+                  </div>
+                  ${pulseBadge(f.severity,f.severity==='HIGH'?'var(--red)':'var(--amber)')}
+                </div>`}).join('')}
+            </div>
+          </div>`).join('')}
+    </div>`;
+}
+
+// ══ TAB 5 — ASTROQUANT TRACK ════════════════════════════════════
+function pulseRenderAstro(el) {
+  const a = PULSE.data?.astro || {};
+  const signals = a.signals || [];
+  const stats = a.stats || {};
+
+  const upcoming = signals.filter(s=>s.outcome==='OPEN').slice(0,10);
+  const past = signals.filter(s=>s.outcome!=='OPEN');
+
+  el.innerHTML = `
+    <!-- Accuracy summary -->
+    ${Object.keys(stats).length?`
+      <div class="panel" style="margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink4);margin-bottom:10px">AstroQuant Signal Accuracy — Last 180 Days</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
+          ${Object.entries(stats).map(([event,s])=>{
+            const rate=s.hits/s.total*100;
+            return `<div style="background:var(--sur3);border-radius:8px;padding:10px 12px">
+              <div style="font-size:10px;font-weight:600;color:var(--ink);margin-bottom:6px">${event.replace(/_/g,' ')}</div>
+              ${winRateBar(rate)}
+              <div style="font-size:9px;color:var(--ink4);margin-top:3px">${s.hits}/${s.total} signals hit</div>
+            </div>`;}).join('')}
+        </div>
+      </div>`:
+      `<div class="panel" style="margin-bottom:14px;text-align:center;padding:20px;color:var(--ink4)">
+        AstroQuant signal accuracy tracking starts accumulating as signals fire. Check back after events like Mercury Retrograde, Jupiter Sign Change etc.
+      </div>`}
+
+    <!-- Upcoming signals -->
+    ${upcoming.length?`
+      <div class="tbl" style="margin-bottom:14px">
+        <div class="tbl-hd"><span class="tbl-ht">🔮 Pending Signals — Awaiting Outcome</span></div>
+        <table><thead><tr><th>Signal Date</th><th>Event</th><th>Instrument</th><th>Predicted</th><th>Window</th><th>Status</th></tr></thead>
+        <tbody>${upcoming.map(s=>`<tr>
+          <td style="font-family:var(--font-mono);font-size:11px">${s.signal_date}</td>
+          <td style="font-size:11px">${s.event_type?.replace(/_/g,' ')}</td>
+          <td style="font-weight:600">${s.instrument}</td>
+          <td style="font-family:var(--font-mono);color:${(s.predicted_return||0)>=0?'var(--green)':'var(--red)';font-weight:700}">${pls((s.predicted_return||0)*100)}</td>
+          <td style="font-size:11px;color:var(--ink4)">${s.window_days}d</td>
+          <td>${pulseBadge('OPEN','var(--ink3)')}</td>
+        </tr>`).join('')}</tbody>
+      </div>`:
+      `<div class="panel" style="text-align:center;padding:16px;color:var(--ink4);font-size:11px">No pending astro signals — signals are logged when major events fire</div>`}
+
+    <!-- Past signal outcomes -->
+    ${past.length?`
+      <div class="tbl">
+        <div class="tbl-hd"><span class="tbl-ht">📜 Signal History — Predicted vs Actual</span></div>
+        <table><thead><tr><th>Date</th><th>Event</th><th>Instrument</th><th>Predicted</th><th>Actual</th><th>Outcome</th></tr></thead>
+        <tbody>${past.slice(0,20).map(s=>`<tr>
+          <td style="font-family:var(--font-mono);font-size:11px">${s.signal_date}</td>
+          <td style="font-size:11px">${s.event_type?.replace(/_/g,' ')}</td>
+          <td style="font-weight:600">${s.instrument}</td>
+          <td style="font-family:var(--font-mono);color:${(s.predicted_return||0)>=0?'var(--green)':'var(--red)'}">${pls((s.predicted_return||0)*100)}</td>
+          <td style="font-family:var(--font-mono);font-weight:700;color:${(s.actual_return||0)>=0?'var(--green)':'var(--red)'}">${pls((s.actual_return||0)*100)}</td>
+          <td>${pulseBadge(s.outcome,s.outcome==='HIT'?'var(--green)':'var(--red)')}</td>
+        </tr>`).join('')}</tbody>
+      </div>`:''  }`;
+}
+
+// ══ TAB 6 — MARKET CONTEXT ══════════════════════════════════════
+function pulseRenderMarket(el) {
+  const s = PULSE.data?.screener || {};
+  const METRIC_META = {
+    universe_pe:     { label: 'Universe Avg PE',    good: [10,25], warn: [25,40], danger: [40,999] },
+    universe_pb:     { label: 'Universe Avg PB',    good: [1,3],   warn: [3,5],   danger: [5,999] },
+    universe_roe:    { label: 'Universe Avg ROE',   good: [15,999],warn: [8,15],  danger: [0,8] },
+    universe_roce:   { label: 'Universe Avg ROCE',  good: [15,999],warn: [8,15],  danger: [0,8] },
+    universe_debtEq: { label: 'Avg Debt/Equity',    good: [0,0.5], warn: [0.5,1], danger: [1,999] },
+    universe_peg:    { label: 'Universe Avg PEG',   good: [0,1.5], warn: [1.5,3], danger: [3,999] },
+  };
+
+  const metricColor = (key, val) => {
+    const m = METRIC_META[key];
+    if(!m||val==null) return 'var(--ink3)';
+    if(val>=m.good[0]&&val<=m.good[1]) return 'var(--green)';
+    if(val>=m.warn[0]&&val<=m.warn[1]) return 'var(--amber)';
+    return 'var(--red)';
+  };
+
+  el.innerHTML = `
+    <div class="panel" style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink4);margin-bottom:12px">Screener Universe Metrics — Today vs 30 Days Ago</div>
+      ${!Object.keys(s).length?'<div style="color:var(--ink4);text-align:center;padding:20px">No screener snapshot yet — upload screener CSV in Tag Manager first</div>':
+        `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+          ${Object.entries(s).map(([key, data])=>{
+            const m = METRIC_META[key] || { label: key.replace('universe_','').toUpperCase() };
+            const c = metricColor(key, data.today);
+            return `<div style="background:var(--sur3);border-radius:10px;padding:14px">
+              <div style="font-size:10px;color:var(--ink4);font-weight:600;margin-bottom:6px">${m.label}</div>
+              <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:${c}">${data.today?.toFixed(1)||'—'}</div>
+              ${data.d30!=null?`<div style="font-size:10px;color:var(--ink4);margin-top:4px">
+                30d ago: ${data.d30?.toFixed(1)} · 
+                <span style="color:${(data.change||0)>0?'var(--amber)':'var(--green)'}">
+                  ${(data.change||0)>0?'▲':'▼'} ${Math.abs(data.change||0).toFixed(2)}
+                </span>
+              </div>`:''}
+            </div>`;}).join('')}
+        </div>`}
+    </div>
+
+    <div style="padding:10px 14px;background:var(--sur3);border-radius:var(--r);font-size:11px;color:var(--ink4)">
+      📌 Market context snapshots daily. Historical percentile tracking (1yr/3yr/5yr) will build as data accumulates.
+      Upload latest Screener.in CSV in Tag Manager to keep metrics current.
+    </div>`;
+}
+
 
 </script>
 </body>
