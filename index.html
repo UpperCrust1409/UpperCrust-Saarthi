@@ -1722,7 +1722,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
       <div class="si" onclick="nav('perf')" id="n-perf"><span class="si-ico">◈</span><span>Performance</span></div>
       <div class="si" onclick="nav('smarttrade')" id="n-smarttrade"><span class="si-ico">🧠</span><span>Smart Trade</span> <span style="font-size:8px;padding:1px 5px;border-radius:5px;background:var(--gold);color:#fff;font-weight:700">NEW</span></div>
       <div class="si" onclick="nav('astroquant')" id="n-astroquant"><span class="si-ico">✦</span><span>AstroQuant</span><span class="si-badge am" id="aq-alert-badge" style="display:none">!</span></div>
-      <div class="si" onclick="nav('pulse')" id="n-pulse"><span class="si-ico">⚡</span><span>Saarthi Pulse</span></div>
       <div class="si" onclick="nav('alert')" id="n-alert"><span class="si-ico">👁</span><span>Bird's Eye View</span></div>
       <div class="si" onclick="nav('alpha')" id="n-alpha"><span class="si-ico">α</span><span>Alpha Tracker</span></div>
     </div>
@@ -34049,7 +34048,7 @@ function pulseRenderOverview(el) {
               <span style="font-size:10px;color:var(--ink4)">${wr?wr.n+' picks':'—'}</span>
             </div>
             ${wr?winRateBar(wr.rate):'<span style="color:var(--ink4);font-size:11px">No closed picks yet</span>'}
-            ${wr?`<div style="font-size:9px;color:var(--ink4);margin-top:2px">Avg return: <span style="color:${wr.avgReturn>=0?'var(--green)':'var(--red)';font-weight:600}">${pls(wr.avgReturn)}</span></div>`:''}
+            ${wr?`<div style="font-size:9px;color:var(--ink4);margin-top:2px">Avg return: <span style="color:${wr.avgReturn>=0?'var(--green)':'var(--red)'}; font-weight:600">${pls(wr.avgReturn)}</span></div>`:''}
           </div>`).join('')}
       </div>
 
@@ -34337,7 +34336,7 @@ function pulseRenderAstro(el) {
           <td style="font-family:var(--font-mono);font-size:11px">${s.signal_date}</td>
           <td style="font-size:11px">${s.event_type?.replace(/_/g,' ')}</td>
           <td style="font-weight:600">${s.instrument}</td>
-          <td style="font-family:var(--font-mono);color:${(s.predicted_return||0)>=0?'var(--green)':'var(--red)';font-weight:700}">${pls((s.predicted_return||0)*100)}</td>
+          <td style="font-family:var(--font-mono);color:${(s.predicted_return||0)>=0?'var(--green)':'var(--red)'};font-weight:700">${pls((s.predicted_return||0)*100)}</td>
           <td style="font-size:11px;color:var(--ink4)">${s.window_days}d</td>
           <td>${pulseBadge('OPEN','var(--ink3)')}</td>
         </tr>`).join('')}</tbody>
