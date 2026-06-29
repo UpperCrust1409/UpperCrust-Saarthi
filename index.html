@@ -2433,7 +2433,8 @@ async function _liveStockAnalyser() {
   });
 
   h+='</tbody></table></div>';
-  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">↻ Refresh</button></div>`;
+  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">↻ Refresh</button>
+        <button onclick="generatePulseReportPDF()" class="btn btn-ghost btn-xs" style="border-color:var(--gold);color:var(--gold3);font-weight:700">📄 Pulse Report</button></div>`;
   h+='</div>';
   return h;
 }
@@ -12350,28 +12351,40 @@ async function _liveMorningBriefing() {
     }catch(e){ console.warn('[Morning] Kite OHLC fetch failed:', e.message); }
   }
 
-  // ── Show today's picks banner if already stored ──
+  // ── Show today's picks banner ──
   const _todayKeyBanner = _getTodayStr();
   if (!_kiteConnected && !_DAILY_PICKS_CACHE[_todayKeyBanner]) {
-    html += `<div style="background:linear-gradient(135deg,#1a1208,#2a1f08);border-radius:12px;padding:12px 16px;margin-bottom:14px;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    html += `<div style="background:var(--glt);border:1.5px solid var(--gbdr);border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
       <div>
-        <div style="font-size:8px;font-weight:700;letter-spacing:2px;color:rgba(200,160,40,.6);text-transform:uppercase;margin-bottom:3px">📅 TODAY'S PICKS · ${_todayKeyBanner}</div>
-        <div style="font-size:11px;color:rgba(255,255,255,.7)">Connect Kite to lock today's picks — Technical scores need live data</div>
+        <div style="font-size:8px;font-weight:700;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:3px">🎯 TODAY'S PICKS · ${_todayKeyBanner}</div>
+        <div style="font-size:11px;color:var(--ink4)">Connect Kite to unlock today's top picks — live technical scores required</div>
       </div>
-      <button onclick="kiteAuth()" style="padding:6px 14px;border-radius:8px;background:rgba(200,160,40,.25);border:1px solid rgba(200,160,40,.4);color:#e8c84a;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">⚡ Connect Kite →</button>
+      <button onclick="kiteAuth()" style="padding:6px 14px;border-radius:8px;background:var(--gold2);border:1px solid var(--gbdr);color:#fff;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">⚡ Connect Kite</button>
     </div>`;
   } else if (_DAILY_PICKS_CACHE[_todayKeyBanner]) {
     const _tp = _DAILY_PICKS_CACHE[_todayKeyBanner];
-    html += `<div style="background:linear-gradient(135deg,#1a3520,#0d1a10);border-radius:12px;padding:12px 16px;margin-bottom:14px;color:#fff;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div>
-        <div style="font-size:8px;font-weight:700;letter-spacing:2px;color:rgba(110,200,138,.5);text-transform:uppercase;margin-bottom:3px">📅 Today's Top Picks · ${_todayKeyBanner} · Locked for the day</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
-          ${[['📈',_tp.tech,'#6ec8ff'],['🏦',_tp.funda,'#6ec88a'],['⭐',_tp.both,'#e8c84a']].map(([ico,stocks,col])=>
-            stocks&&stocks.length?`<div style="display:flex;align-items:center;gap:4px"><span style="font-size:11px">${ico}</span><div style="display:flex;gap:4px">${stocks.slice(0,5).map(s=>`<span style="font-size:10px;font-weight:700;padding:2px 7px;background:rgba(255,255,255,.08);border-radius:6px;color:${col}">${s.sym}${s.inPMS?'✓':''}</span>`).join('')}</div></div>`:''
-          ).join('')}
+    const _allPicks = [...(_tp.both||[]),...(_tp.tech||[]),...(_tp.funda||[])].filter((v,i,a)=>a.findIndex(x=>x.sym===v.sym)===i);
+    const _picksCsv = 'Symbol,Category,In PMS\n'+_allPicks.map(s=>`${s.sym},${(_tp.both||[]).find(x=>x.sym===s.sym)?'Technical + Fundamental':(_tp.tech||[]).find(x=>x.sym===s.sym)?'Technical':'Fundamental'},${s.inPMS?'Yes':'No'}`).join('\n');
+    html += `<div style="background:var(--sur);border:1.5px solid var(--gbdr);border-radius:12px;padding:14px 16px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;margin-bottom:3px">🎯 Today's Top Picks · ${_todayKeyBanner}</div>
+          <div style="font-size:10px;color:var(--ink4)">Locked for the day · ${_allPicks.length} stocks · Multi-factor screened</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button onclick="nav('picks')" style="padding:5px 12px;border-radius:8px;background:var(--glt);border:1px solid var(--gbdr);color:var(--gold3);font-size:10px;font-weight:700;cursor:pointer">📅 History</button>
+          <button onclick="(function(){const blob=new Blob(['${_picksCsv.replace(/'/g,"\'")}'],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='picks_${_todayKeyBanner}.csv';a.click()})()" style="padding:5px 12px;border-radius:8px;background:var(--gold2);border:1px solid var(--gbdr);color:#fff;font-size:10px;font-weight:700;cursor:pointer">↓ Download</button>
         </div>
       </div>
-      <button onclick="nav('picks')" style="padding:6px 14px;border-radius:8px;background:rgba(200,160,40,.2);border:1px solid rgba(200,160,40,.3);color:var(--gold);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">📅 View Calendar →</button>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
+        ${[{ico:'⭐',stocks:_tp.both,label:'Technical + Fundamental',c:'var(--gold)',bg:'var(--glt)',bdr:'var(--gbdr)'},{ico:'📈',stocks:_tp.tech,label:'Technical Leaders',c:'var(--ink)',bg:'var(--sur3)',bdr:'var(--bdr)'},{ico:'🏦',stocks:_tp.funda,label:'Fundamental Quality',c:'var(--green)',bg:'var(--grn2)',bdr:'var(--grnbdr)'}].filter(x=>x.stocks&&x.stocks.length).map(({ico,stocks,label,c,bg,bdr})=>`
+          <div style="background:${bg};border:1px solid ${bdr};border-radius:8px;padding:8px 10px">
+            <div style="font-size:9px;font-weight:700;color:${c};margin-bottom:6px;letter-spacing:.5px">${ico} ${label}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">
+              ${stocks.slice(0,6).map(s=>`<span style="font-size:10px;font-weight:700;padding:3px 8px;background:var(--sur);border:1px solid var(--bdr);border-radius:6px;color:${c}">${s.sym}${s.inPMS?'<span style="color:var(--green);font-size:8px">✓</span>':''}</span>`).join('')}
+            </div>
+          </div>`).join('')}
+      </div>
     </div>`;
   }
 
@@ -12726,6 +12739,17 @@ async function _liveMorningBriefing() {
       both:  _combinedScored,
     };
     await _saveTodayPicks(todayPicks);
+    // ── Also log picks to Pulse DB for accountability tracking ──
+    try {
+      const _allPicksToLog = [...(todayPicks.both||[]),...(todayPicks.tech||[]),...(todayPicks.funda||[])].filter((v,i,a)=>a.findIndex(x=>x.sym===v.sym)===i);
+      for(const pk of _allPicksToLog) {
+        const _liveQ = kiteOHLC[pk.sym]||kiteOHLC['NSE:'+pk.sym];
+        const _entry = _liveQ?.last_price||_liveQ?.close||null;
+        const _cat = (todayPicks.both||[]).find(x=>x.sym===pk.sym)?'BUY+': (todayPicks.tech||[]).find(x=>x.sym===pk.sym)?'TECHNICAL':'FUNDAMENTAL';
+        await authFetch(KITE_BACKEND+'/api/pulse/log-pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:pk.sym,fund:'ALL',signalType:'BUY',entryPrice:_entry,rationale:_cat+' pick on '+_todayKey+' — score '+pk.score,factorScores:{total:pk.score},sector:gm(pk.sym)?.sector||null,date:_todayKey})});
+      }
+      console.log('[Pulse] Logged',_allPicksToLog.length,'picks to DB');
+    } catch(e) { console.warn('[Pulse] Pick log error:',e.message); }
   }
 
   html += section('🏦','Fundamentally Strong','Top 5 · ROE + ROCE + Growth');
@@ -34406,6 +34430,480 @@ function pulseRenderMarket(el) {
     </div>`;
 }
 
+
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SAARTHI PULSE REPORT — PDF Generator
+// World-class fund manager daily briefing
+// Gold/ivory theme · Works on mobile + laptop
+// ═══════════════════════════════════════════════════════════════════════
+
+async function generatePulseReportPDF() {
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const todayKey = _getTodayStr();
+
+  // Show loading toast
+  toast('Generating Pulse Report…','info');
+
+  // Gather all data
+  let pulseData = null;
+  try {
+    const r = await authFetch(KITE_BACKEND+'/api/pulse/report');
+    pulseData = await r.json();
+  } catch(e) {}
+
+  // Gather local data
+  const todayPicks = _DAILY_PICKS_CACHE[todayKey];
+  const allClients = Object.values(DB.clients||{});
+  const totalAUM = allClients.reduce((s,c)=>s+(c.totalCurrent||0),0);
+  const totalInv = allClients.reduce((s,c)=>s+(c.totalInvested||0),0);
+  const totalPnL = totalAUM - totalInv;
+
+  // Fund scores
+  const funds = pulseData?.funds?.today || [];
+  const ucwf = funds.find(x=>x.fund==='UCWF')||{};
+  const ucgf = funds.find(x=>x.fund==='UCGF')||{};
+  const ucpf = funds.find(x=>x.fund==='UCPF')||{};
+
+  // Pick stats
+  const p = pulseData?.picks || {};
+  const flags = pulseData?.clients?.flags || [];
+  const highFlags = flags.filter(f=>f.severity==='HIGH');
+
+  // Client buckets
+  const bkt = pulseData?.clients?.bucketToday || {};
+  const bkt30 = pulseData?.clients?.bucket30d || {};
+
+  // Screener
+  const scr = pulseData?.screener || {};
+
+  // Score color helper
+  const sc = (s) => !s&&s!==0?'#888':s>=70?'#1a6e3a':s>=45?'#9a5208':'#b83228';
+  const wr = (r) => !r&&r!==0?'#888':r>=60?'#1a6e3a':r>=45?'#9a5208':'#b83228';
+
+  // Build picks rows
+  const allPicksList = todayPicks ? [...(todayPicks.both||[]),...(todayPicks.tech||[]),...(todayPicks.funda||[])].filter((v,i,a)=>a.findIndex(x=>x.sym===v.sym)===i) : [];
+
+  const HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Saarthi Pulse Report · ${dateStr}</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --gold:#7c6118;--gold2:#a37e20;--gold3:#5a470f;
+  --glt:#faf4e2;--gbdr:rgba(124,97,24,.18);
+  --ink:#1e1b14;--ink2:#3a3528;--ink3:#5e5848;--ink4:#9e9480;
+  --sur:#fefcf7;--sur2:#faf6ee;--sur3:#f5f0e4;
+  --green:#1a6e3a;--grn2:#ecf7f0;--grnbdr:rgba(26,110,58,.2);
+  --red:#b83228;--red2:#fdf1ef;
+  --amber:#9a5208;--amb2:#fdf4e6;--ambbdr:rgba(154,82,8,.2);
+  --bdr:rgba(0,0,0,.08);
+  --font:'DM Sans',system-ui,sans-serif;
+  --mono:'DM Mono','SF Mono',monospace;
+}
+body{font-family:var(--font);background:var(--sur);color:var(--ink);font-size:12px;line-height:1.5}
+.page{max-width:800px;margin:0 auto;padding:32px 28px}
+.divider{height:1px;background:var(--gbdr);margin:20px 0}
+.thin-divider{height:0.5px;background:var(--bdr);margin:10px 0}
+
+/* COVER */
+.cover{padding:48px 28px;text-align:center;border-bottom:2px solid var(--gbdr)}
+.cover-logo{font-size:11px;font-weight:700;letter-spacing:3px;color:var(--gold);text-transform:uppercase;margin-bottom:8px}
+.cover-title{font-size:36px;font-weight:300;color:var(--ink);letter-spacing:-1px;margin-bottom:4px}
+.cover-title b{font-weight:700;color:var(--gold2)}
+.cover-date{font-size:13px;color:var(--ink4);margin-bottom:32px}
+.cover-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:500px;margin:0 auto}
+.cover-stat{background:var(--sur2);border:1px solid var(--gbdr);border-radius:12px;padding:16px}
+.cover-stat-val{font-family:var(--mono);font-size:20px;font-weight:600;color:var(--ink)}
+.cover-stat-lbl{font-size:9px;color:var(--ink4);text-transform:uppercase;letter-spacing:1px;margin-top:4px}
+
+/* SECTION HEADERS */
+.section-hd{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:8px;border-bottom:1.5px solid var(--gbdr)}
+.section-num{font-size:9px;font-weight:700;color:var(--gold);letter-spacing:2px;text-transform:uppercase;background:var(--glt);border:1px solid var(--gbdr);border-radius:4px;padding:3px 8px}
+.section-title{font-size:16px;font-weight:600;color:var(--ink)}
+.section-sub{font-size:10px;color:var(--ink4);margin-left:auto}
+
+/* KPI GRID */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.kpi{background:var(--sur2);border:1px solid var(--bdr);border-radius:10px;padding:12px 14px}
+.kpi-val{font-family:var(--mono);font-size:22px;font-weight:600;margin-bottom:2px}
+.kpi-lbl{font-size:9px;color:var(--ink4);text-transform:uppercase;letter-spacing:1px}
+.kpi-sub{font-size:10px;color:var(--ink3);margin-top:3px}
+
+/* TABLES */
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--ink4);padding:7px 10px;text-align:left;border-bottom:1.5px solid var(--bdr);background:var(--sur2)}
+td{padding:8px 10px;border-bottom:1px solid var(--bdr);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+.mono{font-family:var(--mono)}
+.pos{color:var(--green);font-weight:600}
+.neg{color:var(--red);font-weight:600}
+.gold{color:var(--gold2);font-weight:700}
+
+/* PICKS CARD */
+.picks-section{margin-bottom:10px}
+.picks-cat{background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.picks-cat-hd{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:7px}
+.picks-chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{font-size:10px;font-weight:600;padding:3px 10px;border-radius:6px;border:1px solid var(--bdr)}
+.chip-gold{background:var(--glt);color:var(--gold3);border-color:var(--gbdr)}
+.chip-green{background:var(--grn2);color:var(--green);border-color:var(--grnbdr)}
+.chip-gray{background:var(--sur3);color:var(--ink3)}
+
+/* WIN RATE BAR */
+.wr-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.wr-bar{flex:1;height:7px;background:var(--sur3);border-radius:4px;overflow:hidden}
+.wr-fill{height:100%;border-radius:4px}
+.wr-label{font-size:11px;font-weight:700;min-width:40px;text-align:right;font-family:var(--mono)}
+.wr-meta{font-size:9px;color:var(--ink4);margin-top:2px}
+
+/* FUND SCORE */
+.fund-card{background:var(--sur2);border:1px solid var(--bdr);border-radius:10px;padding:14px;margin-bottom:10px}
+.fund-name{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:2px}
+.fund-bench{font-size:9px;color:var(--ink4);margin-bottom:10px}
+.fund-score{font-family:var(--mono);font-size:28px;font-weight:700}
+.score-bar{height:7px;background:var(--sur3);border-radius:4px;overflow:hidden;margin:6px 0 10px}
+.score-fill{height:100%;border-radius:4px}
+.score-split{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.score-half{background:var(--sur3);border-radius:7px;padding:8px 10px;text-align:center}
+.score-half-val{font-family:var(--mono);font-size:16px;font-weight:700}
+.score-half-lbl{font-size:8px;color:var(--ink4);text-transform:uppercase;margin-top:2px}
+.score-history{display:flex;gap:12px;margin-top:8px}
+.score-hist-item{font-size:9px;color:var(--ink4)}
+.score-hist-item b{color:var(--ink3);font-family:var(--mono)}
+
+/* FLAGS */
+.flag-card{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-radius:8px;margin-bottom:7px}
+.flag-high{background:var(--red2);border:1px solid rgba(184,50,40,.15)}
+.flag-medium{background:var(--amb2);border:1px solid var(--ambbdr)}
+.flag-icon{font-size:16px;line-height:1}
+.flag-body{flex:1}
+.flag-client{font-size:11px;font-weight:700;color:var(--ink)}
+.flag-type{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px}
+.flag-detail{font-size:10px;color:var(--ink3)}
+.flag-badge{font-size:8px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;align-self:flex-start}
+.badge-high{background:var(--red2);color:var(--red)}
+.badge-medium{background:var(--amb2);color:var(--amber)}
+
+/* ASTRO */
+.astro-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--bdr)}
+.astro-event{font-size:10px;font-weight:600;color:var(--ink2);flex:1}
+.astro-date{font-size:9px;color:var(--ink4);font-family:var(--mono);white-space:nowrap}
+.astro-ret{font-family:var(--mono);font-size:11px;font-weight:700}
+.astro-sig{font-size:8px;font-weight:700;padding:2px 7px;border-radius:4px}
+.sig-buy{background:var(--grn2);color:var(--green)}
+.sig-sell{background:var(--red2);color:var(--red)}
+.sig-hold{background:var(--amb2);color:var(--amber)}
+.sig-acc{background:#e6f1fb;color:#185fa5}
+
+/* SCREENER METRICS */
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.metric-card{background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px}
+.metric-val{font-family:var(--mono);font-size:20px;font-weight:600}
+.metric-lbl{font-size:9px;color:var(--ink4);text-transform:uppercase;letter-spacing:.8px;margin-top:3px}
+.metric-chg{font-size:9px;margin-top:4px}
+
+/* BUCKET TABLE */
+.bucket-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.bucket-cell{text-align:center;padding:12px 8px;border-radius:8px;border:1px solid var(--bdr)}
+.bucket-val{font-family:var(--mono);font-size:22px;font-weight:700}
+.bucket-lbl{font-size:8px;color:var(--ink4);text-transform:uppercase;margin-top:2px}
+
+/* FOOTER */
+.footer{margin-top:32px;padding-top:14px;border-top:1px solid var(--gbdr);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.footer-left{font-size:9px;color:var(--ink4)}
+.footer-right{font-size:9px;color:var(--ink4);text-align:right}
+.disclaimer{margin-top:8px;font-size:8.5px;color:var(--ink4);line-height:1.5;padding:8px 12px;background:var(--sur2);border-radius:6px;border:1px solid var(--bdr)}
+
+/* PAGE BREAK */
+.pb{page-break-after:always}
+.no-break{page-break-inside:avoid}
+
+/* PRINT */
+@media print{
+  body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .no-print{display:none}
+  .page{padding:20px}
+}
+
+/* MOBILE */
+@media(max-width:600px){
+  .cover-stats{grid-template-columns:1fr 1fr}
+  .kpi-grid{grid-template-columns:1fr 1fr}
+  .score-split{grid-template-columns:1fr}
+  .bucket-grid{grid-template-columns:1fr 1fr}
+  .metric-grid{grid-template-columns:1fr 1fr}
+  .page{padding:20px 16px}
+  .cover{padding:32px 16px}
+}
+</style>
+</head>
+<body>
+
+<div class="page">
+
+<!-- ═══ COVER ═══ -->
+<div class="cover">
+  <div class="cover-logo">UpperCrust Wealth · PMS Terminal</div>
+  <div class="cover-title">Saarthi <b>Pulse</b></div>
+  <div class="cover-date">Daily Intelligence Briefing · ${dateStr}</div>
+  <div class="cover-stats">
+    <div class="cover-stat">
+      <div class="cover-stat-val">₹${(totalAUM/10000000).toFixed(1)}Cr</div>
+      <div class="cover-stat-lbl">Total AUM</div>
+    </div>
+    <div class="cover-stat">
+      <div class="cover-stat-val" style="color:${totalPnL>=0?'var(--green)':'var(--red)'}">${totalPnL>=0?'+':''}₹${(Math.abs(totalPnL)/10000000).toFixed(1)}Cr</div>
+      <div class="cover-stat-lbl">Total P&L</div>
+    </div>
+    <div class="cover-stat">
+      <div class="cover-stat-val">${allClients.length}</div>
+      <div class="cover-stat-lbl">Active Clients</div>
+    </div>
+  </div>
+</div>
+
+<div style="margin:24px 0 0">
+
+<!-- ═══ SECTION 1: TODAY'S PICKS ═══ -->
+<div class="section-hd">
+  <span class="section-num">01</span>
+  <span class="section-title">Today's Picks</span>
+  <span class="section-sub">Locked ${todayKey} · Multi-factor screened</span>
+</div>
+
+${allPicksList.length ? `
+<div class="picks-section">
+  ${todayPicks.both&&todayPicks.both.length?`
+  <div class="picks-cat">
+    <div class="picks-cat-hd" style="color:var(--gold2)">⭐ Technical + Fundamental — Highest Conviction</div>
+    <div class="picks-chips">
+      ${todayPicks.both.slice(0,6).map(s=>`<span class="chip chip-gold">${s.sym}${s.inPMS?' ✓':''} <span style="font-size:9px;font-weight:400;color:var(--ink4)">${s.score}/100</span></span>`).join('')}
+    </div>
+  </div>`:''}
+  ${todayPicks.tech&&todayPicks.tech.length?`
+  <div class="picks-cat">
+    <div class="picks-cat-hd" style="color:#185fa5">📈 Technically Strong</div>
+    <div class="picks-chips">
+      ${todayPicks.tech.slice(0,5).map(s=>`<span class="chip chip-green" style="background:#e6f1fb;color:#185fa5;border-color:rgba(24,95,165,.2)">${s.sym}${s.inPMS?' ✓':''}</span>`).join('')}
+    </div>
+  </div>`:''}
+  ${todayPicks.funda&&todayPicks.funda.length?`
+  <div class="picks-cat">
+    <div class="picks-cat-hd" style="color:var(--green)">🏦 Fundamentally Strong</div>
+    <div class="picks-chips">
+      ${todayPicks.funda.slice(0,5).map(s=>`<span class="chip chip-green">${s.sym}${s.inPMS?' ✓':''}</span>`).join('')}
+    </div>
+  </div>`:''}
+</div>
+<div class="disclaimer">✓ = In your PMS portfolio · Scores: Technical (momentum + RSI + gap analysis) + Fundamental (ROE + ROCE + profit growth) · Not investment advice</div>
+` : `<div style="padding:16px;background:var(--sur2);border-radius:8px;font-size:11px;color:var(--ink4);text-align:center">No picks generated yet today — open Saarthi Live to generate</div>`}
+
+<div class="divider"></div>
+
+<!-- ═══ SECTION 2: PICK ACCOUNTABILITY ═══ -->
+<div class="section-hd">
+  <span class="section-num">02</span>
+  <span class="section-title">Pick Accountability</span>
+  <span class="section-sub">Win rate · P&L tracking · 7d / 30d / 180d</span>
+</div>
+
+<div class="kpi-grid" style="margin-bottom:12px">
+  <div class="kpi">
+    <div class="kpi-val" style="color:${wr(p.winRate7d?.rate)}">${p.winRate7d?p.winRate7d.rate.toFixed(1)+'%':'—'}</div>
+    <div class="kpi-lbl">Win Rate · 7 days</div>
+    <div class="kpi-sub">${p.winRate7d?p.winRate7d.n+' closed picks':'No closed picks yet'}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val" style="color:${wr(p.winRate30d?.rate)}">${p.winRate30d?p.winRate30d.rate.toFixed(1)+'%':'—'}</div>
+    <div class="kpi-lbl">Win Rate · 30 days</div>
+    <div class="kpi-sub">${p.winRate30d?'Avg return: '+(p.winRate30d.avgReturn>=0?'+':'')+p.winRate30d.avgReturn.toFixed(2)+'%':'Accumulating data'}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val" style="color:${wr(p.winRate180d?.rate)}">${p.winRate180d?p.winRate180d.rate.toFixed(1)+'%':'—'}</div>
+    <div class="kpi-lbl">Win Rate · 180 days</div>
+    <div class="kpi-sub">${p.winRate180d?p.winRate180d.n+' picks tracked':'Building history'}</div>
+  </div>
+</div>
+
+${(p.perf7d||[]).length?`
+<table class="no-break">
+  <thead><tr><th>Symbol</th><th>Pick Date</th><th>Entry</th><th>Current</th><th style="text-align:right">Return</th><th>Days</th><th>Status</th></tr></thead>
+  <tbody>
+    ${p.perf7d.slice(0,8).map(pk=>`<tr>
+      <td style="font-weight:700">${pk.symbol}</td>
+      <td class="mono">${pk.pick_date}</td>
+      <td class="mono">₹${(pk.entry_price||0).toFixed(0)}</td>
+      <td class="mono">₹${(pk.current_price||0).toFixed(0)}</td>
+      <td style="text-align:right" class="${(pk.return_pct||0)>=0?'pos':'neg'}">${((pk.return_pct||0)*100>=0?'+':'')+((pk.return_pct||0)*100).toFixed(2)}%</td>
+      <td class="mono">${pk.holding_days}d</td>
+      <td><span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:${pk.outcome==='HIT'?'var(--grn2)':pk.outcome==='MISS'?'var(--red2)':'var(--sur3)'};color:${pk.outcome==='HIT'?'var(--green)':pk.outcome==='MISS'?'var(--red)':'var(--ink4)'}">${pk.outcome||'OPEN'}</span></td>
+    </tr>`).join('')}
+  </tbody>
+</table>
+` : `<div style="padding:12px;background:var(--sur2);border-radius:8px;font-size:11px;color:var(--ink4)">Pick performance data builds over time — starts showing after 7 days of picks</div>`}
+
+<div class="divider"></div>
+
+<!-- ═══ SECTION 3: PORTFOLIO HEALTH ═══ -->
+<div class="section-hd">
+  <span class="section-num">03</span>
+  <span class="section-title">Portfolio Health & Hygiene</span>
+  <span class="section-sub">Fund scores · Trend vs 7d / 30d / 180d</span>
+</div>
+
+${[{fund:'UCWF',label:'Wealth Fund',data:ucwf,d7:(pulseData?.funds?.d7||[]).find(x=>x.fund==='UCWF')||{},d30:(pulseData?.funds?.d30||[]).find(x=>x.fund==='UCWF')||{},d180:(pulseData?.funds?.d180||[]).find(x=>x.fund==='UCWF')||{}},
+  {fund:'UCGF',label:'Growth Fund',data:ucgf,d7:(pulseData?.funds?.d7||[]).find(x=>x.fund==='UCGF')||{},d30:(pulseData?.funds?.d30||[]).find(x=>x.fund==='UCWF')||{},d180:{}},
+  {fund:'UCPF',label:'Prosperity Fund',data:ucpf,d7:(pulseData?.funds?.d7||[]).find(x=>x.fund==='UCPF')||{},d30:(pulseData?.funds?.d30||[]).find(x=>x.fund==='UCPF')||{},d180:{}}
+].map(({fund,label,data,d7,d30,d180})=>`
+  <div class="fund-card no-break">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div class="fund-name">${label} (${fund})</div>
+        <div class="fund-bench">vs BSE 500 benchmark</div>
+      </div>
+      <div class="fund-score" style="color:${sc(data.total_score)}">${data.total_score?.toFixed(1)||'—'}<span style="font-size:12px;color:var(--ink4);font-weight:400">/100</span></div>
+    </div>
+    <div class="score-bar"><div class="score-fill" style="width:${Math.min(data.total_score||0,100)}%;background:${sc(data.total_score)}"></div></div>
+    <div class="score-split">
+      <div class="score-half">
+        <div class="score-half-val" style="color:${sc(data.health_score)}">${data.health_score?.toFixed(1)||'—'}</div>
+        <div class="score-half-lbl">Health /50</div>
+      </div>
+      <div class="score-half">
+        <div class="score-half-val" style="color:${sc(data.hygiene_score)}">${data.hygiene_score?.toFixed(1)||'—'}</div>
+        <div class="score-half-lbl">Hygiene /50</div>
+      </div>
+    </div>
+    <div class="score-history">
+      <div class="score-hist-item">7d ago: <b style="color:${sc(d7.total_score)}">${d7.total_score?.toFixed(1)||'—'}</b></div>
+      <div class="score-hist-item">30d ago: <b style="color:${sc(d30.total_score)}">${d30.total_score?.toFixed(1)||'—'}</b></div>
+      <div class="score-hist-item">180d ago: <b style="color:${sc(d180.total_score)}">${d180.total_score?.toFixed(1)||'—'}</b></div>
+    </div>
+  </div>`).join('')}
+
+<div class="divider"></div>
+
+<!-- ═══ SECTION 4: CLIENT BUCKETS ═══ -->
+<div class="section-hd">
+  <span class="section-num">04</span>
+  <span class="section-title">Client Bucket Movement</span>
+  <span class="section-sub">Today vs 7d / 30d ago</span>
+</div>
+
+<div class="bucket-grid no-break">
+  ${[{b:'A',lbl:'Best',c:'var(--green)',bg:'var(--grn2)'},{b:'B',lbl:'On Track',c:'var(--amber)',bg:'var(--amb2)'},{b:'C',lbl:'At Risk',c:'var(--red)',bg:'var(--red2)'},{b:'E',lbl:'Exception',c:'var(--ink4)',bg:'var(--sur3)'}].map(({b,lbl,c,bg})=>`
+  <div class="bucket-cell" style="background:${bg};border-color:${bg}">
+    <div class="bucket-val" style="color:${c}">${bkt[b]||0}</div>
+    <div class="bucket-lbl" style="color:${c}">${b} · ${lbl}</div>
+    <div style="font-size:9px;color:var(--ink4);margin-top:4px">30d: ${bkt30[b]||0}</div>
+  </div>`).join('')}
+</div>
+
+${flags.length?`
+<div style="margin-top:12px">
+  <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--ink4);margin-bottom:8px">Clients Requiring Attention — ${flags.length} flags · ${highFlags.length} HIGH priority</div>
+  ${flags.slice(0,6).map(f=>{
+    const meta={CONCENTRATION:{icon:'⚠',lbl:'Concentration Risk'},UNDERPERFORM:{icon:'📉',lbl:'Underperformance'},CASH_IDLE:{icon:'💰',lbl:'Idle Cash'},HIGH_PE:{icon:'📊',lbl:'High PE Exposure'},STALE:{icon:'🕰',lbl:'No Activity'},SIP_LAPSE:{icon:'🔔',lbl:'SIP Risk'}}[f.flag_type]||{icon:'⚠',lbl:f.flag_type};
+    return `<div class="flag-card flag-${f.severity.toLowerCase()} no-break">
+      <div class="flag-icon">${meta.icon}</div>
+      <div class="flag-body">
+        <div class="flag-type" style="color:${f.severity==='HIGH'?'var(--red)':'var(--amber)'}">${meta.lbl}</div>
+        <div class="flag-client">${f.client_name?.split('(')[0]?.trim()}</div>
+        <div class="flag-detail">${f.detail}</div>
+      </div>
+      <span class="flag-badge badge-${f.severity.toLowerCase()}">${f.severity}</span>
+    </div>`;}).join('')}
+</div>
+` : `<div style="padding:10px 14px;background:var(--grn2);border-radius:8px;font-size:11px;color:var(--green);margin-top:8px">✓ No client flags today — all portfolios healthy</div>`}
+
+<div class="divider"></div>
+
+<!-- ═══ SECTION 5: ASTROQUANT ═══ -->
+<div class="section-hd">
+  <span class="section-num">05</span>
+  <span class="section-title">AstroQuant Signal Tracker</span>
+  <span class="section-sub">Planetary cycles × Indian market history</span>
+</div>
+
+${(function(){
+  const upcoming = [{date:'2026-12-06',event:'Rahu Sign Change → Capricorn',hist:'+7.01%',winRate:'64%',signal:'BUY',inst:'Natural Gas'},
+    {date:'2027-03-16',event:'Jupiter Sign Change → Leo',hist:'+2.47%',winRate:'68%',signal:'Accumulate',inst:'Nifty Energy'},
+    {date:'2028-04-08',event:'Mars Retrograde Starts',hist:'+3.67%',winRate:'83%',signal:'BUY',inst:'Nifty Bank'}];
+  return `<table class="no-break">
+    <thead><tr><th>Date</th><th>Event</th><th>Instrument</th><th>Hist. Return</th><th>Win Rate</th><th>Signal</th></tr></thead>
+    <tbody>
+      ${upcoming.map(u=>`<tr>
+        <td class="mono">${u.date}</td>
+        <td style="font-weight:600">${u.event}</td>
+        <td>${u.inst}</td>
+        <td class="${u.hist.startsWith('+')?'pos':'neg'}">${u.hist}</td>
+        <td class="mono">${u.winRate}</td>
+        <td><span class="astro-sig ${u.signal==='BUY'?'sig-buy':u.signal==='SELL'?'sig-sell':u.signal==='Accumulate'?'sig-acc':'sig-hold'}">${u.signal}</span></td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+})()}
+<div class="disclaimer" style="margin-top:8px">Research tool only · Historical patterns ≠ future returns · Not investment advice · Always combine with fundamental and technical analysis</div>
+
+<div class="divider"></div>
+
+<!-- ═══ SECTION 6: MARKET CONTEXT ═══ -->
+<div class="section-hd">
+  <span class="section-num">06</span>
+  <span class="section-title">Market Context</span>
+  <span class="section-sub">Screener metrics · Universe PE / PB / ROE vs history</span>
+</div>
+
+<div class="metric-grid no-break">
+  ${Object.keys(scr).length?Object.entries(scr).map(([key,data])=>{
+    const labels={universe_pe:'Universe Avg PE',universe_pb:'Avg PB',universe_roe:'Avg ROE',universe_roce:'Avg ROCE',universe_debtEq:'Debt/Equity',universe_peg:'Avg PEG'};
+    const lbl=labels[key]||key.replace('universe_','').toUpperCase();
+    const chg=data.change;
+    return `<div class="metric-card">
+      <div class="metric-val">${data.today?.toFixed(1)||'—'}</div>
+      <div class="metric-lbl">${lbl}</div>
+      ${chg!=null?`<div class="metric-chg" style="color:${chg>0?'var(--amber)':'var(--green)'}">${chg>0?'▲':'▼'} ${Math.abs(chg).toFixed(2)} vs 30d</div>`:''}
+    </div>`;}).join('')
+  :`<div style="padding:14px;background:var(--sur2);border-radius:8px;font-size:11px;color:var(--ink4);grid-column:1/-1">Upload latest Screener CSV in Tag Manager to see market metrics</div>`}
+</div>
+
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  <div class="footer-left">
+    <div style="font-weight:600;color:var(--gold2)">Saarthi Pulse · UpperCrust Wealth Management</div>
+    <div>Generated ${today.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} IST · ${dateStr}</div>
+  </div>
+  <div class="footer-right">
+    <div>Confidential — For internal use only</div>
+    <div>PMS Terminal · uppercrustsaarthi.in</div>
+  </div>
+</div>
+<div class="disclaimer">This report is generated automatically by the Saarthi PMS Terminal. All data is sourced from live portfolio uploads, Kite API, and Screener.in. Historical planetary cycle data is for research purposes only and does not constitute investment advice. Past performance is not indicative of future results. This document is confidential and intended solely for UpperCrust Wealth fund management use.</div>
+
+</div>
+
+<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px;z-index:999">
+  <button onclick="window.print()" style="padding:10px 20px;background:var(--gold2);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)">🖨 Print / Save PDF</button>
+  <button onclick="window.close()" style="padding:10px 20px;background:var(--sur2);color:var(--ink3);border:1px solid var(--bdr);border-radius:8px;font-size:12px;cursor:pointer;font-family:var(--font)">✕ Close</button>
+</div>
+
+</body></html>`;
+
+  // Open in new window for print
+  const win = window.open('', '_blank', 'width=900,height=700');
+  win.document.write(HTML);
+  win.document.close();
+  toast('Pulse Report ready — click Print / Save PDF','info');
+}
 
 </script>
 </body>
