@@ -2433,7 +2433,8 @@ async function _liveStockAnalyser() {
   });
 
   h+='</tbody></table></div>';
-  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">&#x21BB; Refresh</button></div>`;
+  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">&#x21BB; Refresh</button>
+        <button onclick="generatePulseReportPDF()" class="btn btn-ghost btn-xs" style="border-color:var(--gold);color:var(--gold3);font-weight:700">&#128196; Pulse Report</button></div>`;
   h+='</div>';
   return h;
 }
@@ -11649,7 +11650,6 @@ function renderLive(el) {
         ${hasScreener?`<span style="padding:4px 10px;border-radius:20px;font-size:9px;font-weight:700;background:var(--glt);color:var(--gold2);border:1px solid var(--gbdr)">📊 Screener Loaded</span>`:''}
         ${kiteOk?`<button onclick="kiteAuth()" class="btn btn-ghost btn-xs" style="font-size:10px;border-color:var(--green);color:var(--green)">↻ Reconnect Kite</button>`:`<button onclick="kiteAuth()" class="btn btn-gold btn-xs" style="font-size:10px">⚡ Connect Kite</button>`}
         <button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">↻</button>
-        <button onclick="generatePulseReportPDF()" class="btn btn-ghost btn-xs" style="border-color:var(--gold);color:var(--gold3);font-weight:700">&#128196; Pulse Report</button>
       </div>
     </div>
   </div>`;
@@ -34435,360 +34435,396 @@ function pulseRenderMarket(el) {
 
 
 
-// --- SAARTHI PULSE REPORT ----------------------------------------
-// World-class PDF generator - Gold/ivory - Mobile + Desktop
-// -----------------------------------------------------------------
-function generatePulseReportPDF() { _buildPulseReport(); }
+// --- SAARTHI PULSE REPORT ---------------------------------------
+function generatePulseReportPDF(){ _buildPulseReport(); }
 
-async function _buildPulseReport() {
+async function _buildPulseReport(){
   const today = new Date();
   const dateStr = today.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   const timeStr = today.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   const todayKey = _getTodayStr();
-  toast('Generating Pulse Report...','info');
+  toast('Building Pulse Report...','info');
 
-  // Fetch Pulse DB data
-  let pd = null;
-  try {
-    const r = await authFetch(KITE_BACKEND+'/api/pulse/report');
-    if(r.ok) pd = await r.json();
-  } catch(e){ console.warn('[Pulse PDF]',e.message); }
+  // Load picks if not loaded
+  if(!_PICKS_LOADED) await _loadDailyPicks();
 
-  // Local data
-  const tp = _DAILY_PICKS_CACHE[todayKey];
+  // -- LIVE DATA: compute everything from local state --
   const clients = Object.values(DB.clients||{});
-  const aum = clients.reduce((s,c)=>s+(c.totalCurrent||0),0);
-  const inv = clients.reduce((s,c)=>s+(c.totalInvested||0),0);
-  const pnl = aum - inv;
-  const pnlPct = inv>0?(pnl/inv*100):0;
+  const totalAUM = clients.reduce((s,c)=>s+(c.totalCurrent||0),0);
+  const totalInv = clients.reduce((s,c)=>s+(c.totalInvested||0),0);
+  const totalPnL = totalAUM - totalInv;
+  const pnlPct   = totalInv>0?(totalPnL/totalInv*100):0;
 
-  // Fund data
-  const fToday = pd?.funds?.today||[];
-  const f7d    = pd?.funds?.d7||[];
-  const f30d   = pd?.funds?.d30||[];
-  const f180d  = pd?.funds?.d180||[];
-  const picks  = pd?.picks||{};
-  const flags  = pd?.clients?.flags||[];
-  const bkt    = pd?.clients?.bucketToday||{};
-  const bkt7   = pd?.clients?.bucket7d||{};
-  const bkt30  = pd?.clients?.bucket30d||{};
-  const scr    = pd?.screener||{};
+  // Per-fund stats
+  const fundDefs = [
+    {key:'UCWF', label:'Wealth Fund',     nav:NAV_DATA,        color:'#7c6118'},
+    {key:'UCGF', label:'Growth Fund',     nav:GROWTH_NAV_DATA, color:'#185fa5'},
+    {key:'UCPF', label:'Prosperity Fund', nav:PROS_NAV_DATA,   color:'#1a6e3a'},
+  ];
+  const fundStats = fundDefs.map(f=>{
+    const fc = clients.filter(c=>(c.fund||'UCWF')===f.key);
+    const faum = fc.reduce((s,c)=>s+(c.totalCurrent||0),0);
+    const finv = fc.reduce((s,c)=>s+(c.totalInvested||0),0);
+    const scores = fc.map(c=>calcPortfolioScore(c)).filter(Boolean);
+    const avgH  = scores.length?Math.round(scores.reduce((s,x)=>s+(x.health||0),0)/scores.length):null;
+    const avgHy = scores.length?Math.round(scores.reduce((s,x)=>s+(x.hygiene||0),0)/scores.length):null;
+    const avgT  = scores.length?Math.round(scores.reduce((s,x)=>s+(x.total||0),0)/scores.length):null;
+    // NAV CAGR
+    let cagr = null;
+    if(f.nav&&f.nav.length>=2){
+      const first=f.nav[0], last=f.nav[f.nav.length-1];
+      if(first.nav&&last.nav){
+        const d1=new Date(String(first.date).replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3'));
+        const d2=new Date(String(last.date).replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3'));
+        const yrs=(d2-d1)/86400000/365.25;
+        if(yrs>=0.5) cagr=(Math.pow(last.nav/first.nav,1/yrs)-1)*100;
+      }
+    }
+    const latestNav = f.nav&&f.nav.length?f.nav[f.nav.length-1].nav:null;
+    return {key:f.key, label:f.label, color:f.color, faum, finv, n:fc.length, avgH, avgHy, avgT, cagr, latestNav, scores};
+  });
 
-  // All today's picks
-  const allPms = new Set(clients.flatMap(c=>(c.holdings||[]).map(h=>h.symbol)));
+  // Client scores + buckets
+  const scored = clients.map(c=>{
+    const s = calcPortfolioScore(c);
+    const b = getClientBucket(c);
+    return {name:c.name, aum:c.totalCurrent||0, fund:c.fund||'UCWF', score:s, bucket:b};
+  }).filter(x=>x.score);
+  const buckets = {A:0,B:0,C:0,E:0};
+  scored.forEach(x=>{ buckets[x.bucket.label]=(buckets[x.bucket.label]||0)+1; });
+  const atRisk = scored.filter(x=>x.bucket.label==='C').sort((a,b)=>a.score.total-b.score.total).slice(0,8);
+  const topPerf = scored.filter(x=>x.bucket.label==='A').sort((a,b)=>b.score.total-a.score.total).slice(0,5);
+
+  // Client risk flags (computed live)
+  const riskFlags = [];
+  clients.forEach(c=>{
+    const aum = c.totalCurrent||0; if(!aum||!c.holdings?.length) return;
+    const sorted = c.holdings.slice().sort((a,b)=>(b.marketValue||0)-(a.marketValue||0));
+    const top = sorted[0];
+    if(top&&top.marketValue/aum>0.20) riskFlags.push({client:c.name.split('(')[0].trim(),type:'CONCENTRATION',sev:'HIGH',detail:top.symbol+' = '+(top.marketValue/aum*100).toFixed(0)+'% of portfolio'});
+    const cashPct=(c.cash||0)/aum;
+    if(cashPct>0.18) riskFlags.push({client:c.name.split('(')[0].trim(),type:'IDLE CASH',sev:cashPct>0.35?'HIGH':'MEDIUM',detail:(cashPct*100).toFixed(0)+'% idle &mdash; deploy opportunity'});
+    const bk = getClientBucket(c);
+    if(bk.label==='C') riskFlags.push({client:c.name.split('(')[0].trim(),type:'UNDERPERFORM',sev:'HIGH',detail:bk.desc+' &middot; '+bk.displayReturn});
+  });
+  riskFlags.sort((a,b)=>a.sev==='HIGH'?-1:1);
+
+  // -- PICKS: last 30 days --
+  const pickDates = Object.keys(_DAILY_PICKS_CACHE).sort((a,b)=>b.localeCompare(a)).slice(0,30);
+  const todayPicks = _DAILY_PICKS_CACHE[todayKey]||_DAILY_PICKS_CACHE[pickDates[0]];
+  const latestPickDate = todayPicks === _DAILY_PICKS_CACHE[todayKey] ? todayKey : pickDates[0];
+
+  // Worst signals from screener
   const allSyms = Object.keys(_SCREENER_DATA).filter(s=>!_EXCLUDED_SYMS.has(s));
+  const pmsSet  = new Set(clients.flatMap(c=>(c.holdings||[]).map(h=>h.symbol)));
+  const worstB  = allSyms.map(s=>{const t=_techScore(s);const f=_fundaScore(s);if(!t||!f)return null;return{sym:s,score:Math.round(f.score/2+t.score),inPMS:pmsSet.has(s)};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
+  const worstT  = allSyms.map(s=>{const t=_techScore(s);if(!t)return null;return{sym:s,score:t.score,inPMS:pmsSet.has(s)};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
+  const worstF  = allSyms.map(s=>{const f=_fundaScore(s);if(!f)return null;return{sym:s,score:f.score,inPMS:pmsSet.has(s)};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
 
-  // Best picks
-  const picksBoth  = tp ? (tp.both||[]).slice(0,6)  : [];
-  const picksTech  = tp ? (tp.tech||[]).slice(0,5)  : [];
-  const picksFunda = tp ? (tp.funda||[]).slice(0,5) : [];
+  // Screener universe metrics
+  const scrMetrics = {};
+  const peVals=[], pbVals=[], roeVals=[], rceVals=[];
+  allSyms.forEach(s=>{
+    const d=_SCREENER_DATA[s]||{};
+    if(d.pe&&d.pe>0&&d.pe<200) peVals.push(d.pe);
+    if(d.pb&&d.pb>0) pbVals.push(d.pb);
+    if(d.roe&&d.roe>0) roeVals.push(d.roe);
+    if(d.roce&&d.roce>0) rceVals.push(d.roce);
+  });
+  const med = arr=>arr.length?arr.sort((a,b)=>a-b)[Math.floor(arr.length/2)]:null;
+  const avg = arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
+  if(peVals.length)  scrMetrics['Nifty Median PE']  = {v:med(peVals),  n:peVals.length,  good:[10,22], warn:[22,35]};
+  if(pbVals.length)  scrMetrics['Universe Avg P/B']  = {v:avg(pbVals)?.toFixed(1),  n:pbVals.length,  good:[1,3],   warn:[3,5]};
+  if(roeVals.length) scrMetrics['Universe Avg ROE %'] = {v:avg(roeVals)?.toFixed(1), n:roeVals.length, good:[15,999],warn:[8,15]};
+  if(rceVals.length) scrMetrics['Universe Avg ROCE %']= {v:avg(rceVals)?.toFixed(1), n:rceVals.length, good:[15,999],warn:[8,15]};
 
-  // Worst/exit picks - inverse of best
-  const worstB = allSyms.map(s=>{
-    const t=_techScore(s); const f=_fundaScore(s);
-    if(!t||!f) return null;
-    return {sym:s,score:Math.round(f.score/2+t.score),inPMS:allPms.has(s)};
-  }).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
+  // -- UPCOMING ASTRO EVENTS --
+  const astroEvents = [
+    {date:'2026-10-04',event:'Venus Retrograde Ends',inst:'Nifty Energy',ret:'+2.57',wr:'60% (35)',sig:'Accumulate',sc:'#185fa5',sb:'#e6f1fb'},
+    {date:'2026-12-06',event:'Rahu Sign Change to Capricorn',inst:'Natural Gas',ret:'+7.01',wr:'64% (14)',sig:'BUY',sc:'#1a6e3a',sb:'#ecf7f0'},
+    {date:'2027-03-16',event:'Jupiter Sign Change to Leo',inst:'Nifty Bank',ret:'+2.67',wr:'73% (22)',sig:'Accumulate',sc:'#185fa5',sb:'#e6f1fb'},
+    {date:'2028-04-08',event:'Mars Retrograde Starts',inst:'Nifty Bank',ret:'+3.67',wr:'83% (12)',sig:'BUY',sc:'#1a6e3a',sb:'#ecf7f0'},
+  ];
 
-  const worstT = allSyms.map(s=>{
-    const t=_techScore(s); if(!t) return null;
-    return {sym:s,score:t.score,inPMS:allPms.has(s)};
-  }).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
+  // -- HELPERS --
+  const SC  = s => s==null?'#999':s>=70?'#1a6e3a':s>=45?'#9a5208':'#b83228';
+  const SBG = s => s==null?'#f5f0e4':s>=70?'#ecf7f0':s>=45?'#fdf4e6':'#fdf1ef';
+  const CR  = n => n==null?'--':'\u20b9'+(Math.abs(n)/10000000).toFixed(1)+'Cr';
+  const PCT = n => n==null?'--':(n>=0?'+':'')+n.toFixed(1)+'%';
+  const chip = (sym,inPMS,bg,fg,bdr) =>
+    '<span style="display:inline-block;margin:2px 3px 2px 0;padding:3px 10px;border-radius:6px;font-size:10px;font-weight:600;background:'+bg+';color:'+fg+';border:1px solid '+bdr+'">'+
+    sym+(inPMS?'<span style="color:#1a6e3a;font-size:8px;margin-left:3px;font-weight:700">IN</span>':'')+'</span>';
+  const scoreBar = (val,max,color) =>
+    '<div style="height:6px;background:#f0ede4;border-radius:3px;overflow:hidden;margin:5px 0 8px">'+
+    '<div style="height:100%;width:'+Math.min((val||0)/max*100,100)+'%;background:'+color+';border-radius:3px;transition:width .5s"></div></div>';
+  const kpi = (val,lbl,sub,vc) =>
+    '<div style="background:#faf6ee;border:1px solid rgba(124,97,24,.15);border-radius:10px;padding:12px 14px">'+
+    '<div style="font-family:DM Mono,monospace;font-size:20px;font-weight:700;color:'+(vc||'#1e1b14')+'">'+val+'</div>'+
+    '<div style="font-size:9px;color:#9e9480;text-transform:uppercase;letter-spacing:1px;margin-top:3px">'+lbl+'</div>'+
+    (sub?'<div style="font-size:10px;color:#5e5848;margin-top:3px">'+sub+'</div>':'')+'</div>';
+  const secHead = (num,title,sub,nbg,nfg) =>
+    '<div style="display:flex;align-items:center;gap:10px;margin:24px 0 14px;padding-bottom:10px;border-bottom:2px solid rgba(124,97,24,.2)">'+
+    '<span style="font-size:9px;font-weight:700;letter-spacing:2px;background:'+(nbg||'#faf4e2')+';color:'+(nfg||'#7c6118')+';border:1px solid rgba(124,97,24,.25);border-radius:4px;padding:3px 8px;white-space:nowrap">'+num+'</span>'+
+    '<div><div style="font-size:16px;font-weight:700;color:#1e1b14;line-height:1">'+title+'</div>'+
+    (sub?'<div style="font-size:10px;color:#9e9480;margin-top:2px">'+sub+'</div>':'')+'</div></div>';
+  const div = () => '<div style="height:1px;background:rgba(124,97,24,.15);margin:20px 0"></div>';
 
-  const worstF = allSyms.map(s=>{
-    const f=_fundaScore(s); if(!f) return null;
-    return {sym:s,score:f.score,inPMS:allPms.has(s)};
-  }).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
-
-  // Helpers
-  const SC = s => s==null?'#999':s>=70?'#1a6e3a':s>=45?'#9a5208':'#b83228';
-  const WC = r => r==null?'#999':r>=60?'#1a6e3a':r>=45?'#9a5208':'#b83228';
-  const FMT = (n,d) => n==null?'--':(n>=0?'+':'')+n.toFixed(d||2)+'%';
-  const CR = n => n==null?'--':'\u20b9'+(Math.abs(n)/10000000).toFixed(1)+'Cr';
-
-  const chip = (sym, inPMS, bg, fg, bdr) =>
-    '<span style="display:inline-block;margin:2px;padding:3px 10px;border-radius:6px;font-size:10px;font-weight:600;background:'+bg+';color:'+fg+';border:1px solid '+bdr+'">'+
-    sym+(inPMS?'<span style="color:#1a6e3a;font-size:8px;margin-left:3px">\u2713</span>':'')+'</span>';
-
-  const badge = (text, bg, fg) =>
-    '<span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+bg+';color:'+fg+'">'+text+'</span>';
-
-  const sectionHead = (num, title, sub, numBg, numFg) => {
-    numBg = numBg||'#faf4e2'; numFg = numFg||'#7c6118';
-    return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:8px;border-bottom:1.5px solid rgba(124,97,24,.2)">'+
-    '<span style="font-size:9px;font-weight:700;letter-spacing:2px;background:'+numBg+';color:'+numFg+';border:1px solid rgba(124,97,24,.2);border-radius:4px;padding:3px 8px">'+num+'</span>'+
-    '<span style="font-size:15px;font-weight:600;color:#1e1b14">'+title+'</span>'+
-    (sub?'<span style="font-size:10px;color:#9e9480;margin-left:auto">'+sub+'</span>':'')+'</div>';
-  };
-
-  const fundCard = (label, fund, today, d7, d30, d180) => {
-    const sc = today.total_score; const sh = today.health_score; const sy = today.hygiene_score;
-    return '<div style="background:#faf6ee;border:1px solid rgba(0,0,0,.08);border-radius:10px;padding:14px;margin-bottom:10px">'+
-    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'+
-    '<div><div style="font-size:12px;font-weight:700;color:#1e1b14">'+label+' ('+fund+')</div>'+
-    '<div style="font-size:9px;color:#9e9480;margin-top:2px">vs BSE 500 \u00b7 scored daily at 6:15 AM IST</div></div>'+
-    '<div style="font-size:26px;font-weight:700;font-family:DM Mono,monospace;color:'+SC(sc)+'">'+
-    (sc!=null?sc.toFixed(1):'&mdash;')+'<span style="font-size:11px;color:#9e9480;font-weight:400">/100</span></div></div>'+
-    '<div style="height:7px;background:#f5f0e4;border-radius:4px;overflow:hidden;margin-bottom:10px">'+
-    '<div style="height:100%;width:'+Math.min(sc||0,100)+'%;background:'+SC(sc)+';border-radius:4px"></div></div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'+
-    '<div style="background:#f5f0e4;border-radius:7px;padding:8px;text-align:center">'+
-    '<div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;color:'+SC(sh)+'">'+( sh!=null?sh.toFixed(1):'&mdash;')+'</div>'+
-    '<div style="font-size:8px;color:#9e9480;text-transform:uppercase;margin-top:2px">Health /50</div></div>'+
-    '<div style="background:#f5f0e4;border-radius:7px;padding:8px;text-align:center">'+
-    '<div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;color:'+SC(sy)+'">'+( sy!=null?sy.toFixed(1):'&mdash;')+'</div>'+
-    '<div style="font-size:8px;color:#9e9480;text-transform:uppercase;margin-top:2px">Hygiene /50</div></div></div>'+
-    '<div style="display:flex;gap:16px">'+
-    '<span style="font-size:9px;color:#9e9480">7d ago: <b style="font-family:DM Mono,monospace;color:'+SC(d7?.total_score)+'">'+( d7?.total_score!=null?d7.total_score.toFixed(1):'&mdash;')+'</b></span>'+
-    '<span style="font-size:9px;color:#9e9480">30d ago: <b style="font-family:DM Mono,monospace;color:'+SC(d30?.total_score)+'">'+( d30?.total_score!=null?d30.total_score.toFixed(1):'&mdash;')+'</b></span>'+
-    '<span style="font-size:9px;color:#9e9480">180d ago: <b style="font-family:DM Mono,monospace;color:'+SC(d180?.total_score)+'">'+( d180?.total_score!=null?d180.total_score.toFixed(1):'&mdash;')+'</b></span>'+
-    '</div></div>';
-  };
-
-  // --- Build HTML -----------------------------------------------
+  // ------------------ BUILD HTML ------------------
   let H = '';
 
-  // COVER
-  H += '<div style="text-align:center;padding-bottom:28px;margin-bottom:28px;border-bottom:2px solid rgba(124,97,24,.2)">';
-  H += '<div style="font-size:10px;font-weight:700;letter-spacing:3px;color:#7c6118;text-transform:uppercase;margin-bottom:10px">UpperCrust Wealth &middot; PMS Terminal</div>';
-  H += '<div style="font-size:38px;font-weight:300;color:#1e1b14;letter-spacing:-1.5px;margin-bottom:4px">Saarthi <span style="font-weight:700;color:#a37e20">Pulse</span></div>';
-  H += '<div style="font-size:13px;color:#9e9480;margin-bottom:28px">Daily Intelligence Briefing &middot; '+dateStr+'</div>';
-  H += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:480px;margin:0 auto">';
-  H += '<div style="background:#faf6ee;border:1px solid rgba(124,97,24,.18);border-radius:10px;padding:14px"><div style="font-size:22px;font-weight:700;font-family:DM Mono,monospace">'+CR(aum)+'</div><div style="font-size:9px;color:#9e9480;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Total AUM</div></div>';
-  H += '<div style="background:#faf6ee;border:1px solid rgba(124,97,24,.18);border-radius:10px;padding:14px"><div style="font-size:22px;font-weight:700;font-family:DM Mono,monospace;color:'+(pnl>=0?'#1a6e3a':'#b83228')+'">'+(pnl>=0?'+':'')+CR(pnl)+'</div><div style="font-size:9px;color:#9e9480;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Total P&amp;L ('+(pnlPct>=0?'+':'')+pnlPct.toFixed(1)+'%)</div></div>';
-  H += '<div style="background:#faf6ee;border:1px solid rgba(124,97,24,.18);border-radius:10px;padding:14px"><div style="font-size:22px;font-weight:700;font-family:DM Mono,monospace">'+clients.length+'</div><div style="font-size:9px;color:#9e9480;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Active Clients</div></div>';
+  // -- COVER --
+  H += '<div style="text-align:center;padding:36px 0 28px;border-bottom:2px solid rgba(124,97,24,.2);margin-bottom:4px">';
+  H += '<div style="font-size:10px;font-weight:700;letter-spacing:3.5px;color:#a37e20;text-transform:uppercase;margin-bottom:12px">UpperCrust Wealth Management</div>';
+  H += '<div style="font-size:42px;font-weight:300;color:#1e1b14;letter-spacing:-2px;line-height:1;margin-bottom:6px">Saarthi <span style="font-weight:800;color:#a37e20">Pulse</span></div>';
+  H += '<div style="font-size:13px;color:#9e9480;letter-spacing:.3px;margin-bottom:28px">Daily Fund Manager Intelligence Briefing</div>';
+  H += '<div style="font-size:12px;font-weight:600;color:#5e5848;margin-bottom:20px">'+dateStr+' &nbsp;&middot;&nbsp; '+timeStr+' IST</div>';
+  H += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;max-width:600px;margin:0 auto">';
+  H += kpi(CR(totalAUM),'Total AUM','3 funds');
+  H += kpi(CR(totalPnL),'Total P&L',PCT(pnlPct),totalPnL>=0?'#1a6e3a':'#b83228');
+  H += kpi(clients.length+'','Active Clients','across 3 funds');
+  H += kpi(Object.keys(_SCREENER_DATA).length+'','Screener Universe','stocks tracked');
   H += '</div></div>';
 
-  // --- SECTION 1: TODAY'S PICKS ---
-  H += sectionHead('01','Today\'s Picks','Locked '+todayKey+' &middot; Multi-factor screened');
-  if(tp && (picksBoth.length||picksTech.length||picksFunda.length)) {
-    if(picksBoth.length) {
-      H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#a37e20;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\u2b50 Best of Both Worlds &mdash; Highest Conviction</div><div>';
-      picksBoth.forEach(s=>{ H += chip(s.sym,s.inPMS,'#faf4e2','#5a470f','rgba(124,97,24,.25)') + '<span style="font-size:9px;color:#9e9480;margin-right:4px">'+s.score+'/100</span>'; });
-      H += '</div></div>';
-    }
-    if(picksTech.length) {
-      H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#185fa5;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\ud83d\udcc8 Technically Strong &mdash; Momentum Leaders</div><div>';
-      picksTech.forEach(s=>{ H += chip(s.sym,s.inPMS,'#e6f1fb','#185fa5','rgba(24,95,165,.2)'); });
-      H += '</div></div>';
-    }
-    if(picksFunda.length) {
-      H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#1a6e3a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\ud83c\udfe6 Fundamentally Strong &mdash; Quality Companies</div><div>';
-      picksFunda.forEach(s=>{ H += chip(s.sym,s.inPMS,'#ecf7f0','#1a6e3a','rgba(26,110,58,.2)'); });
-      H += '</div></div>';
-    }
-  } else {
-    H += '<div style="padding:14px;background:#faf6ee;border-radius:8px;font-size:11px;color:#9e9480;text-align:center">No picks generated today &mdash; open Morning Brief to generate</div>';
-  }
-
-  // --- EXIT / AVOID ---
-  H += '<div style="margin-top:18px">';
-  H += sectionHead('EXIT','Exit / Avoid Signals','Weakest scores in your screener today','#fdf1ef','#b83228');
-  if(worstB.length) {
-    H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#b83228;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\u26a0 Weakest Combined &mdash; Review for Exit</div><div>';
-    worstB.forEach(s=>{ H += chip(s.sym,s.inPMS,'#fdf1ef','#b83228','rgba(184,50,40,.2)') + '<span style="font-size:9px;color:#9e9480;margin-right:4px">'+s.score+'/100</span>'; });
-    H += '</div></div>';
-    H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#b83228;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\ud83d\udcc9 Technically Weak</div><div>';
-    worstT.forEach(s=>{ H += chip(s.sym,s.inPMS,'#fdf1ef','#b83228','rgba(184,50,40,.2)'); });
-    H += '</div></div>';
-    H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#9a5208;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\ud83d\udce6 Fundamentally Weak</div><div>';
-    worstF.forEach(s=>{ H += chip(s.sym,s.inPMS,'#fdf4e6','#9a5208','rgba(154,82,8,.2)'); });
-    H += '</div></div>';
-  } else {
-    H += '<div style="padding:14px;background:#faf6ee;border-radius:8px;font-size:11px;color:#9e9480">Upload Screener CSV to see exit signals</div>';
-  }
-  H += '<div style="font-size:8.5px;color:#9e9480;padding:8px 12px;background:#faf6ee;border-radius:6px;border:1px solid rgba(0,0,0,.07);margin-top:8px">\u2713 = In your PMS portfolio &middot; Signals based on live screener scores &middot; Not investment advice &middot; Always apply fundamental judgement</div>';
-  H += '</div>';
-
-  H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
-
-  // --- SECTION 2: PICK ACCOUNTABILITY ---
-  H += sectionHead('02','Pick Accountability','Win rate &middot; P&amp;L tracking &middot; 7d / 30d / 180d');
-  H += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">';
-  [
-    {label:'Win Rate 7d',   wr:picks.winRate7d},
-    {label:'Win Rate 30d',  wr:picks.winRate30d},
-    {label:'Win Rate 180d', wr:picks.winRate180d}
-  ].forEach(({label,wr})=>{
-    H += '<div style="background:#faf6ee;border:1px solid rgba(0,0,0,.08);border-radius:10px;padding:12px 14px">';
-    H += '<div style="font-size:22px;font-weight:700;font-family:DM Mono,monospace;color:'+WC(wr?.rate)+'">'+(wr?wr.rate.toFixed(1)+'%':'&mdash;')+'</div>';
-    H += '<div style="font-size:9px;color:#9e9480;text-transform:uppercase;letter-spacing:1px;margin-top:3px">'+label+'</div>';
-    H += '<div style="font-size:10px;color:#5e5848;margin-top:4px">'+(wr?wr.n+' picks &middot; avg '+(wr.avgReturn>=0?'+':'')+wr.avgReturn.toFixed(2)+'%':'Accumulating data')+'</div>';
+  // -- SECTION 1: FUND HEALTH --
+  H += secHead('01','Portfolio Health & Hygiene','Live scores computed from '+clients.length+' portfolios &middot; vs BSE 500 benchmark');
+  H += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">';
+  fundStats.forEach(f=>{
+    const s=f.avgT; const h=f.avgH; const hy=f.avgHy;
+    H += '<div style="background:#faf6ee;border:1px solid rgba(124,97,24,.15);border-top:3px solid '+f.color+';border-radius:10px;padding:14px">';
+    H += '<div style="font-size:11px;font-weight:700;color:#1e1b14;margin-bottom:2px">'+f.label+'</div>';
+    H += '<div style="font-size:9px;color:#9e9480;margin-bottom:10px">'+f.key+' &middot; '+f.n+' clients &middot; AUM '+CR(f.faum)+'</div>';
+    H += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">';
+    H += '<span style="font-family:DM Mono,monospace;font-size:28px;font-weight:700;color:'+SC(s)+'">'+( s!=null?s:'--')+'</span>';
+    H += '<span style="font-size:10px;color:#9e9480">/100</span></div>';
+    H += scoreBar(s,100,SC(s));
+    H += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">';
+    H += '<div style="background:'+SBG(h)+';border-radius:7px;padding:7px 8px;text-align:center"><div style="font-family:DM Mono,monospace;font-size:15px;font-weight:700;color:'+SC(h)+'">'+( h!=null?h:'--')+'</div><div style="font-size:8px;color:#9e9480;margin-top:1px">Health /50</div></div>';
+    H += '<div style="background:'+SBG(hy)+';border-radius:7px;padding:7px 8px;text-align:center"><div style="font-family:DM Mono,monospace;font-size:15px;font-weight:700;color:'+SC(hy)+'">'+( hy!=null?hy:'--')+'</div><div style="font-size:8px;color:#9e9480;margin-top:1px">Hygiene /50</div></div>';
+    H += '</div>';
+    if(f.cagr!=null) H += '<div style="font-size:10px;color:#5e5848">Since inception CAGR: <b style="color:'+SC(f.cagr>12?70:f.cagr>8?50:30)+'">'+f.cagr.toFixed(1)+'%</b></div>';
+    if(f.latestNav) H += '<div style="font-size:9px;color:#9e9480;margin-top:2px">NAV '+f.latestNav.toFixed(2)+'</div>';
     H += '</div>';
   });
   H += '</div>';
 
-  if((picks.perf7d||[]).length) {
-    H += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:4px">';
-    H += '<thead><tr style="background:#faf6ee">';
-    ['Symbol','Pick Date','Fund','Entry','Current','Return','Days','Status'].forEach(t=>{
-      H += '<th style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#9e9480;padding:7px 10px;text-align:left;border-bottom:1.5px solid rgba(0,0,0,.08)">'+t+'</th>';
+  // Client distribution
+  H += '<div style="margin-top:14px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">';
+  [{b:'A',l:'Compounding',c:'#1a6e3a',bg:'#ecf7f0'},{b:'B',l:'On Track',c:'#9a5208',bg:'#fdf4e6'},{b:'C',l:'At Risk',c:'#b83228',bg:'#fdf1ef'},{b:'E',l:'New Portfolio',c:'#9e9480',bg:'#f5f0e4'}].forEach(({b,l,c,bg})=>{
+    H += '<div style="background:'+bg+';border-radius:8px;padding:12px;text-align:center;border:1px solid rgba(0,0,0,.06)">';
+    H += '<div style="font-family:DM Mono,monospace;font-size:26px;font-weight:700;color:'+c+'">'+(buckets[b]||0)+'</div>';
+    H += '<div style="font-size:9px;font-weight:700;color:'+c+';text-transform:uppercase;margin-top:2px">Bucket '+b+'</div>';
+    H += '<div style="font-size:9px;color:#9e9480;margin-top:2px">'+l+'</div></div>';
+  });
+  H += '</div>';
+
+  H += div();
+
+  // -- SECTION 2: TODAY'S PICKS --
+  H += secHead('02','Today\'s Picks &amp; Exit Signals',latestPickDate+' &middot; Multi-factor screened &middot; Technical + Fundamental');
+  
+  if(todayPicks && (todayPicks.both||todayPicks.tech||todayPicks.funda)) {
+    // BUY signals
+    H += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
+    H += '<div>';
+    if(todayPicks.both?.length){
+      H += '<div style="font-size:9px;font-weight:700;color:#a37e20;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Best of Both Worlds</div><div style="margin-bottom:10px">';
+      todayPicks.both.slice(0,6).forEach(s=>{ H += chip(s.sym,s.inPMS,'#faf4e2','#5a470f','rgba(124,97,24,.3)')+'<span style="font-size:9px;color:#9e9480"> '+s.score+'/100</span> '; });
+      H += '</div>';
+    }
+    if(todayPicks.tech?.length){
+      H += '<div style="font-size:9px;font-weight:700;color:#185fa5;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Technically Strong</div><div style="margin-bottom:10px">';
+      todayPicks.tech.slice(0,5).forEach(s=>{ H += chip(s.sym,s.inPMS,'#e6f1fb','#185fa5','rgba(24,95,165,.25)'); });
+      H += '</div>';
+    }
+    if(todayPicks.funda?.length){
+      H += '<div style="font-size:9px;font-weight:700;color:#1a6e3a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Fundamentally Strong</div><div>';
+      todayPicks.funda.slice(0,5).forEach(s=>{ H += chip(s.sym,s.inPMS,'#ecf7f0','#1a6e3a','rgba(26,110,58,.25)'); });
+      H += '</div>';
+    }
+    H += '</div>';
+    // EXIT signals
+    H += '<div style="background:#fdf1ef;border-radius:10px;padding:14px;border:1px solid rgba(184,50,40,.15)">';
+    H += '<div style="font-size:11px;font-weight:700;color:#b83228;margin-bottom:10px">Exit / Avoid Signals</div>';
+    if(worstB.length){
+      H += '<div style="font-size:9px;font-weight:700;color:#b83228;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Weakest Combined Score</div><div style="margin-bottom:8px">';
+      worstB.forEach(s=>{ H += chip(s.sym,s.inPMS,'#fdf1ef','#b83228','rgba(184,50,40,.25)')+'<span style="font-size:9px;color:#9e9480"> '+s.score+'/100</span> '; });
+      H += '</div>';
+      H += '<div style="font-size:9px;font-weight:700;color:#9a5208;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Fundamentally Weak</div><div>';
+      worstF.forEach(s=>{ H += chip(s.sym,s.inPMS,'#fdf4e6','#9a5208','rgba(154,82,8,.25)'); });
+      H += '</div>';
+    } else {
+      H += '<div style="font-size:11px;color:#9e9480">Upload Screener CSV to see exit signals</div>';
+    }
+    H += '</div>';
+    H += '</div>';
+
+    // Pick history table
+    if(pickDates.length>1){
+      H += '<div style="font-size:9px;font-weight:700;color:#9e9480;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Pick History &mdash; Last '+Math.min(pickDates.length,10)+' sessions</div>';
+      H += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
+      H += '<thead><tr>';
+      ['Date','Best of Both','Technical','Fundamental'].forEach(h=>{
+        H += '<th style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#9e9480;padding:6px 10px;text-align:left;border-bottom:1.5px solid rgba(0,0,0,.08);background:#faf6ee">'+h+'</th>';
+      });
+      H += '</tr></thead><tbody>';
+      pickDates.slice(0,10).forEach((d,i)=>{
+        const pk = _DAILY_PICKS_CACHE[d];
+        if(!pk) return;
+        const bg = i%2===0?'#fff':'#faf6ee';
+        H += '<tr style="background:'+bg+'">';
+        H += '<td style="padding:6px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace;font-weight:600;color:'+( d===todayKey?'#a37e20':'#1e1b14')+'">'+d+(d===todayKey?' <span style="font-size:8px;background:#faf4e2;color:#a37e20;padding:1px 5px;border-radius:3px">Today</span>':'')+'</td>';
+        const fmtSyms = (arr) => (arr||[]).slice(0,4).map(s=>'<span style="font-size:10px;font-weight:600;padding:1px 6px;background:#f0ede4;border-radius:4px;margin-right:3px">'+s.sym+(s.inPMS?'<span style="color:#1a6e3a;font-size:7px">+</span>':'')+'</span>').join('');
+        H += '<td style="padding:6px 10px;border-bottom:1px solid rgba(0,0,0,.05)">'+fmtSyms(pk.both)+'</td>';
+        H += '<td style="padding:6px 10px;border-bottom:1px solid rgba(0,0,0,.05)">'+fmtSyms(pk.tech)+'</td>';
+        H += '<td style="padding:6px 10px;border-bottom:1px solid rgba(0,0,0,.05)">'+fmtSyms(pk.funda)+'</td>';
+        H += '</tr>';
+      });
+      H += '</tbody></table>';
+    }
+  } else {
+    H += '<div style="padding:20px;background:#faf6ee;border-radius:8px;text-align:center;color:#9e9480">No picks found &mdash; generate picks in Morning Brief first</div>';
+  }
+
+  H += div();
+
+  // -- SECTION 3: CLIENT RISK FLAGS --
+  H += secHead('03','Client Risk Flags',riskFlags.length+' flags today &middot; Computed live from portfolio data','#fdf1ef','#b83228');
+  if(riskFlags.length){
+    const high = riskFlags.filter(x=>x.sev==='HIGH');
+    const med  = riskFlags.filter(x=>x.sev==='MEDIUM');
+    if(high.length){
+      H += '<div style="font-size:9px;font-weight:700;color:#b83228;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">High Priority ('+high.length+')</div>';
+      high.slice(0,6).forEach(f=>{
+        H += '<div style="display:flex;gap:10px;padding:9px 12px;border-radius:8px;margin-bottom:6px;background:#fdf1ef;border:1px solid rgba(184,50,40,.15)">';
+        H += '<div style="flex:1"><div style="font-size:11px;font-weight:700;color:#1e1b14">'+f.client+'</div>';
+        H += '<div style="font-size:9px;font-weight:700;color:#b83228;text-transform:uppercase;margin:1px 0">'+f.type+'</div>';
+        H += '<div style="font-size:10px;color:#5e5848">'+f.detail+'</div></div>';
+        H += '<span style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:4px;height:fit-content;background:#fdf1ef;color:#b83228;border:1px solid rgba(184,50,40,.3);white-space:nowrap">HIGH</span>';
+        H += '</div>';
+      });
+    }
+    if(med.length){
+      H += '<div style="font-size:9px;font-weight:700;color:#9a5208;text-transform:uppercase;letter-spacing:1px;margin:10px 0 8px">Medium Priority ('+med.length+')</div>';
+      med.slice(0,4).forEach(f=>{
+        H += '<div style="display:flex;gap:10px;padding:9px 12px;border-radius:8px;margin-bottom:6px;background:#fdf4e6;border:1px solid rgba(154,82,8,.15)">';
+        H += '<div style="flex:1"><div style="font-size:11px;font-weight:700;color:#1e1b14">'+f.client+'</div>';
+        H += '<div style="font-size:9px;font-weight:700;color:#9a5208;text-transform:uppercase;margin:1px 0">'+f.type+'</div>';
+        H += '<div style="font-size:10px;color:#5e5848">'+f.detail+'</div></div>';
+        H += '<span style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:4px;height:fit-content;background:#fdf4e6;color:#9a5208;border:1px solid rgba(154,82,8,.3);white-space:nowrap">MED</span>';
+        H += '</div>';
+      });
+    }
+  } else {
+    H += '<div style="padding:14px;background:#ecf7f0;border-radius:8px;font-size:11px;color:#1a6e3a;font-weight:600">No risk flags today &mdash; all portfolios within acceptable parameters</div>';
+  }
+
+  // At-risk clients table
+  if(atRisk.length){
+    H += '<div style="margin-top:14px"><div style="font-size:9px;font-weight:700;color:#9e9480;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Bucket C &mdash; Clients Needing Attention</div>';
+    H += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>';
+    ['Client','Fund','AUM','Health','Hygiene','Total','Return','Status'].forEach(h=>{
+      H += '<th style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#9e9480;padding:6px 10px;text-align:left;border-bottom:1.5px solid rgba(0,0,0,.08);background:#faf6ee">'+h+'</th>';
     });
     H += '</tr></thead><tbody>';
-    picks.perf7d.slice(0,10).forEach(pk=>{
-      const ret = (pk.return_pct||0)*100;
-      const oc = pk.outcome||'OPEN';
-      const ocBg = oc==='HIT'?'#ecf7f0':oc==='MISS'?'#fdf1ef':'#f5f0e4';
-      const ocFg = oc==='HIT'?'#1a6e3a':oc==='MISS'?'#b83228':'#9e9480';
-      H += '<tr>';
-      H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-weight:700">'+pk.symbol+'</td>';
-      H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-family:DM Mono,monospace">'+pk.pick_date+'</td>';
-      H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06)">'+(pk.pulse_picks_log?.fund||'ALL')+'</td>';
-      H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-family:DM Mono,monospace">\u20b9'+(pk.entry_price||0).toFixed(0)+'</td>';
-      H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-family:DM Mono,monospace">\u20b9'+(pk.current_price||0).toFixed(0)+'</td>';
-      H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-weight:700;color:'+(ret>=0?'#1a6e3a':'#b83228')+';font-family:DM Mono,monospace">'+(ret>=0?'+':'')+ret.toFixed(2)+'%</td>';
-      H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-family:DM Mono,monospace">'+pk.holding_days+'d</td>';
-      H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06)"><span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:'+ocBg+';color:'+ocFg+'">'+oc+'</span></td>';
+    atRisk.forEach((x,i)=>{
+      const s=x.score; const b=x.bucket;
+      H += '<tr style="background:'+(i%2?'#faf6ee':'#fff')+'">';
+      H += '<td style="padding:7px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-weight:600">'+x.name.split('(')[0].trim().slice(0,18)+'</td>';
+      H += '<td style="padding:7px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-size:10px">'+x.fund+'</td>';
+      H += '<td style="padding:7px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace">'+CR(x.aum)+'</td>';
+      H += '<td style="padding:7px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace;color:'+SC(s.health)+'">'+s.health+'</td>';
+      H += '<td style="padding:7px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace;color:'+SC(s.hygiene)+'">'+s.hygiene+'</td>';
+      H += '<td style="padding:7px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace;font-weight:700;color:'+SC(s.total)+'">'+s.total+'</td>';
+      H += '<td style="padding:7px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace;font-size:10px">'+b.displayReturn+'</td>';
+      H += '<td style="padding:7px 10px;border-bottom:1px solid rgba(0,0,0,.05)"><span style="font-size:9px;padding:2px 6px;border-radius:4px;background:#fdf1ef;color:#b83228;font-weight:700">'+b.desc.split(' ')[0]+'</span></td>';
       H += '</tr>';
     });
-    H += '</tbody></table>';
-  } else {
-    H += '<div style="padding:12px;background:#faf6ee;border-radius:8px;font-size:11px;color:#9e9480">Pick performance builds over 7 days as picks are logged daily</div>';
+    H += '</tbody></table></div>';
   }
 
-  H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
-
-  // --- SECTION 3: PORTFOLIO HEALTH ---
-  H += sectionHead('03','Portfolio Health &amp; Hygiene','Fund scores &middot; Trend over time');
-  ['UCWF','UCGF','UCPF'].forEach(f=>{
-    const labels = {UCWF:'Wealth Fund',UCGF:'Growth Fund',UCPF:'Prosperity Fund'};
-    H += fundCard(
-      labels[f], f,
-      fToday.find(x=>x.fund===f)||{},
-      f7d.find(x=>x.fund===f)||{},
-      f30d.find(x=>x.fund===f)||{},
-      f180d.find(x=>x.fund===f)||{}
-    );
-  });
-
-  H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
-
-  // --- SECTION 4: CLIENT BUCKETS + FLAGS ---
-  H += sectionHead('04','Client Buckets &amp; Risk Flags','Movement vs 30d &middot; '+flags.length+' flags today');
-  H += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
-  [{b:'A',l:'Best',c:'#1a6e3a',bg:'#ecf7f0'},{b:'B',l:'On Track',c:'#9a5208',bg:'#fdf4e6'},{b:'C',l:'At Risk',c:'#b83228',bg:'#fdf1ef'},{b:'E',l:'Exception',c:'#9e9480',bg:'#f5f0e4'}].forEach(({b,l,c,bg})=>{
-    const curr = bkt[b]||0, prev = bkt30[b]||0, d = curr-prev;
-    H += '<div style="text-align:center;padding:14px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.07);background:'+bg+'">';
-    H += '<div style="font-size:26px;font-weight:700;font-family:DM Mono,monospace;color:'+c+'">'+curr+'</div>';
-    H += '<div style="font-size:9px;font-weight:700;color:'+c+';text-transform:uppercase;margin-top:3px">'+b+' &middot; '+l+'</div>';
-    H += '<div style="font-size:9px;color:#9e9480;margin-top:5px">30d: '+prev+' <span style="color:'+(d>0?'#1a6e3a':d<0?'#b83228':'#9e9480')+'">'+(d>0?'&#9650;':d<0?'&#9660;':' ')+Math.abs(d)+'</span></div>';
-    H += '</div>';
-  });
-  H += '</div>';
-
-  if(flags.length) {
-    const FM = {CONCENTRATION:{i:'\u26a0',l:'Concentration Risk'},UNDERPERFORM:{i:'\ud83d\udcc9',l:'Underperformance'},CASH_IDLE:{i:'\ud83d\udcb0',l:'Idle Cash'},HIGH_PE:{i:'\ud83d\udcc8',l:'High PE Exposure'},STALE:{i:'\ud83d\udd70',l:'No Activity'},SIP_LAPSE:{i:'\ud83d\udd14',l:'SIP Risk'}};
-    H += '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#9e9480;margin-bottom:8px">Clients Requiring Attention</div>';
-    flags.slice(0,8).forEach(f=>{
-      const m = FM[f.flag_type]||{i:'\u26a0',l:f.flag_type};
-      const hi = f.severity==='HIGH';
-      H += '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:7px;background:'+(hi?'#fdf1ef':'#fdf4e6')+';border:1px solid '+(hi?'rgba(184,50,40,.15)':'rgba(154,82,8,.2)')+'">';
-      H += '<div style="font-size:16px;line-height:1;padding-top:1px">'+m.i+'</div>';
-      H += '<div style="flex:1">';
-      H += '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:'+(hi?'#b83228':'#9a5208')+'">'+m.l+'</div>';
-      H += '<div style="font-size:11px;font-weight:700;color:#1e1b14;margin-top:1px">'+f.client_name.split('(')[0].trim()+'</div>';
-      H += '<div style="font-size:10px;color:#5e5848;margin-top:2px">'+f.detail+'</div>';
-      H += '</div>';
-      H += '<span style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;align-self:flex-start;background:'+(hi?'#fdf1ef':'#fdf4e6')+';color:'+(hi?'#b83228':'#9a5208')+'">'+f.severity+'</span>';
+  // Top performers
+  if(topPerf.length){
+    H += '<div style="margin-top:14px"><div style="font-size:9px;font-weight:700;color:#1a6e3a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Bucket A &mdash; Compounding Clients</div>';
+    H += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+    topPerf.forEach(x=>{
+      H += '<div style="background:#ecf7f0;border:1px solid rgba(26,110,58,.2);border-radius:8px;padding:8px 12px">';
+      H += '<div style="font-size:10px;font-weight:700;color:#1e1b14">'+x.name.split('(')[0].trim().slice(0,16)+'</div>';
+      H += '<div style="font-family:DM Mono,monospace;font-size:16px;font-weight:700;color:#1a6e3a">'+x.score.total+'</div>';
+      H += '<div style="font-size:9px;color:#9e9480">'+x.bucket.displayReturn+'</div>';
       H += '</div>';
     });
-  } else {
-    H += '<div style="padding:12px 14px;background:#ecf7f0;border-radius:8px;font-size:11px;color:#1a6e3a">\u2713 No client flags today &mdash; all portfolios healthy</div>';
+    H += '</div></div>';
   }
 
-  H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
+  H += div();
 
-  // --- SECTION 5: ASTROQUANT ---
-  H += sectionHead('05','AstroQuant Signal Tracker','Planetary cycles \u00d7 Indian market history');
-  const astroEvents = [
-    {d:'2026-12-06',e:'Rahu Sign Change \u2192 Capricorn',i:'Natural Gas',r:'+7.01%',w:'64% (14 obs)',s:'BUY',sc:'#1a6e3a',sb:'#ecf7f0'},
-    {d:'2026-10-04',e:'Venus Retrograde',i:'Nifty Energy',r:'+2.57%',w:'60% (35 obs)',s:'Accumulate',sc:'#185fa5',sb:'#e6f1fb'},
-    {d:'2027-03-16',e:'Jupiter Sign Change \u2192 Leo',i:'Nifty Bank',r:'+2.67%',w:'73% (22 obs)',s:'Accumulate',sc:'#185fa5',sb:'#e6f1fb'},
-    {d:'2028-04-08',e:'Mars Retrograde Starts',i:'Nifty Bank',r:'+3.67%',w:'83% (12 obs)',s:'BUY',sc:'#1a6e3a',sb:'#ecf7f0'},
-    {d:'2028-06-24',e:'Rahu Sign Change \u2192 Sagittarius',i:'Natural Gas',r:'+7.01%',w:'64% (14 obs)',s:'BUY',sc:'#1a6e3a',sb:'#ecf7f0'}
-  ];
+  // -- SECTION 4: MARKET CONTEXT --
+  H += secHead('04','Market Context &amp; Screener Universe',Object.keys(_SCREENER_DATA).length+' stocks &middot; Live data from your screener');
+  if(Object.keys(scrMetrics).length){
+    H += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
+    Object.entries(scrMetrics).forEach(([lbl,m])=>{
+      const v = parseFloat(m.v);
+      const color = v>=m.good[0]&&v<=m.good[1]?'#1a6e3a':v>=m.warn[0]&&v<=m.warn[1]?'#9a5208':'#b83228';
+      const bg = v>=m.good[0]&&v<=m.good[1]?'#ecf7f0':v>=m.warn[0]&&v<=m.warn[1]?'#fdf4e6':'#fdf1ef';
+      H += '<div style="background:'+bg+';border:1px solid rgba(0,0,0,.07);border-radius:10px;padding:12px">';
+      H += '<div style="font-family:DM Mono,monospace;font-size:22px;font-weight:700;color:'+color+'">'+m.v+'</div>';
+      H += '<div style="font-size:9px;color:#9e9480;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">'+lbl+'</div>';
+      H += '<div style="font-size:9px;color:#5e5848;margin-top:3px">'+m.n+' stocks</div>';
+      H += '</div>';
+    });
+    H += '</div>';
+  } else {
+    H += '<div style="padding:14px;background:#faf6ee;border-radius:8px;font-size:11px;color:#9e9480">Upload Screener CSV in Tag Manager to see market metrics</div>';
+  }
+
+  H += div();
+
+  // -- SECTION 5: ASTROQUANT --
+  H += secHead('05','AstroQuant Signal Tracker','Upcoming planetary events &times; Indian market history &middot; Backtested 2005-2026');
   H += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:10px">';
-  H += '<thead><tr style="background:#faf6ee">';
-  ['Date','Event','Instrument','Hist. Return','Win Rate','Signal'].forEach(t=>{
-    H += '<th style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#9e9480;padding:7px 10px;text-align:left;border-bottom:1.5px solid rgba(0,0,0,.08)">'+t+'</th>';
+  H += '<thead><tr>';
+  ['Date','Event','Instrument','Hist. Return','Win Rate','Signal'].forEach(h=>{
+    H += '<th style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#9e9480;padding:7px 10px;text-align:left;border-bottom:1.5px solid rgba(0,0,0,.08);background:#faf6ee">'+h+'</th>';
   });
   H += '</tr></thead><tbody>';
-  astroEvents.forEach(u=>{
-    H += '<tr>';
-    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-family:DM Mono,monospace;font-size:10px">'+u.d+'</td>';
-    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-weight:600">'+u.e+'</td>';
-    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06)">'+u.i+'</td>';
-    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-weight:700;color:#1a6e3a;font-family:DM Mono,monospace">'+u.r+'</td>';
-    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06);font-family:DM Mono,monospace">'+u.w+'</td>';
-    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.06)"><span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+u.sb+';color:'+u.sc+'">'+u.s+'</span></td>';
+  astroEvents.forEach((u,i)=>{
+    H += '<tr style="background:'+(i%2?'#faf6ee':'#fff')+'">';
+    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace;font-size:10px;font-weight:600">'+u.date+'</td>';
+    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-weight:600;color:#1e1b14">'+u.event+'</td>';
+    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.05)">'+u.inst+'</td>';
+    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace;font-weight:700;color:#1a6e3a">+'+u.ret+'%</td>';
+    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.05);font-family:DM Mono,monospace">'+u.wr+'</td>';
+    H += '<td style="padding:8px 10px;border-bottom:1px solid rgba(0,0,0,.05)"><span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+u.sb+';color:'+u.sc+'">'+u.sig+'</span></td>';
     H += '</tr>';
   });
   H += '</tbody></table>';
-  H += '<div style="font-size:8.5px;color:#9e9480;padding:8px 12px;background:#faf6ee;border-radius:6px;border:1px solid rgba(0,0,0,.07)">Research tool only &middot; Historical patterns &ne; future returns &middot; Combine with fundamental and technical analysis &middot; Not investment advice</div>';
+  H += '<div style="font-size:8.5px;color:#9e9480;padding:8px 12px;background:#faf6ee;border-radius:6px">Research tool only &middot; Historical patterns &ne; future returns &middot; Always combine with fundamental and technical analysis</div>';
 
-  H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
+  // -- FOOTER --
+  H += '<div style="margin-top:32px;padding-top:16px;border-top:2px solid rgba(124,97,24,.2);display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px">';
+  H += '<div><div style="font-size:13px;font-weight:700;color:#a37e20;letter-spacing:-.2px">Saarthi Pulse &middot; UpperCrust Wealth Management</div>';
+  H += '<div style="font-size:10px;color:#9e9480;margin-top:2px">Generated '+timeStr+' IST &middot; '+dateStr+'</div></div>';
+  H += '<div style="text-align:right"><div style="font-size:10px;font-weight:600;color:#5e5848">Confidential &mdash; Internal Use Only</div><div style="font-size:9px;color:#9e9480">uppercrustsaarthi.in</div></div></div>';
+  H += '<div style="margin-top:10px;font-size:8.5px;color:#9e9480;line-height:1.6;padding:10px 14px;background:#faf6ee;border-radius:8px">This report is auto-generated by Saarthi PMS Terminal from live portfolio and screener data. Planetary cycle signals are for quantitative research only. Not investment advice. Confidential &mdash; UpperCrust Wealth Management.</div>';
 
-  // --- SECTION 6: MARKET CONTEXT ---
-  H += sectionHead('06','Market Context','Screener universe metrics vs 30 days ago');
-  const mlbl = {universe_pe:'Universe Avg PE',universe_pb:'Avg P/B Ratio',universe_roe:'Avg ROE %',universe_roce:'Avg ROCE %',universe_debtEq:'Debt / Equity',universe_peg:'Avg PEG Ratio'};
-  if(Object.keys(scr).length) {
-    H += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">';
-    Object.entries(scr).forEach(([k,v])=>{
-      const chg = v.change;
-      H += '<div style="background:#faf6ee;border:1px solid rgba(0,0,0,.08);border-radius:8px;padding:10px 12px">';
-      H += '<div style="font-size:20px;font-weight:700;font-family:DM Mono,monospace;color:#1e1b14">'+(v.today?.toFixed(1)||'&mdash;')+'</div>';
-      H += '<div style="font-size:9px;color:#9e9480;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">'+(mlbl[k]||k)+'</div>';
-      if(chg!=null) H += '<div style="font-size:9px;margin-top:5px;color:'+(chg>0?'#9a5208':'#1a6e3a')+'">'+(chg>0?'&#9650;':'&#9660;')+' '+Math.abs(chg).toFixed(2)+' vs 30d</div>';
-      H += '</div>';
-    });
-    H += '</div>';
-  } else {
-    H += '<div style="padding:14px;background:#faf6ee;border-radius:8px;font-size:11px;color:#9e9480">Upload latest Screener.in CSV in Tag Manager to see market context metrics</div>';
-  }
+  // -- PRINT BUTTON --
+  H += '<div class="no-print" style="position:fixed;bottom:24px;right:24px;display:flex;gap:8px;z-index:9999">';
+  H += '<button onclick="window.print()" style="padding:12px 24px;background:#a37e20;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;font-family:DM Sans,sans-serif;letter-spacing:.2px">Print / Save PDF</button>';
+  H += '<button onclick="window.close()" style="padding:12px 16px;background:#faf6ee;color:#5e5848;border:1px solid rgba(0,0,0,.12);border-radius:10px;font-size:12px;cursor:pointer;font-family:DM Sans,sans-serif">x</button>';
+  H += '</div>';
 
-  // --- FOOTER ---
-  H += '<div style="margin-top:32px;padding-top:16px;border-top:1px solid rgba(124,97,24,.2);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
-  H += '<div><div style="font-size:11px;font-weight:600;color:#a37e20">Saarthi Pulse &middot; UpperCrust Wealth Management</div>';
-  H += '<div style="font-size:9px;color:#9e9480;margin-top:2px">Generated '+timeStr+' IST &middot; '+dateStr+'</div></div>';
-  H += '<div style="text-align:right;font-size:9px;color:#9e9480"><div style="font-weight:600">Confidential &mdash; Internal Use Only</div><div>uppercrustsaarthi.in</div></div></div>';
-  H += '<div style="margin-top:10px;font-size:8.5px;color:#9e9480;line-height:1.6;padding:10px 14px;background:#faf6ee;border-radius:8px;border:1px solid rgba(0,0,0,.07)">This report is automatically generated by the Saarthi PMS Terminal. All data sourced from live portfolio uploads, Zerodha Kite API, and Screener.in. Planetary cycle data is for quantitative research purposes only. This document is confidential and intended solely for UpperCrust Wealth Management internal use. Not investment advice. Past performance is not indicative of future results.</div>';
+  // -- CSS --
+  const CSS = '*{box-sizing:border-box;margin:0;padding:0}body{font-family:"DM Sans",system-ui,sans-serif;background:#fefcf7;color:#1e1b14;font-size:12px;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{max-width:820px;margin:0 auto;padding:36px 32px}@media print{.no-print{display:none!important}body{background:#fff}}@media(max-width:600px){.page{padding:20px 16px}}';
 
-  // --- CSS ---
-  const CSS = [
-    '*{box-sizing:border-box;margin:0;padding:0}',
-    'body{font-family:"DM Sans",system-ui,sans-serif;background:#fefcf7;color:#1e1b14;font-size:12px;line-height:1.5}',
-    '.page{max-width:800px;margin:0 auto;padding:36px 32px}',
-    '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.no-print{display:none !important}}',
-    '@media(max-width:600px){.page{padding:20px 16px}}'
-  ].join('');
+  const FULL = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Saarthi Pulse - '+dateStr+'</title><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"><style>'+CSS+'</style></head><body><div class="page">'+H+'</div></body></html>';
 
-  const printBtn = '<div class="no-print" style="position:fixed;bottom:24px;right:24px;display:flex;gap:8px;z-index:9999;filter:drop-shadow(0 4px 12px rgba(0,0,0,.15))">'+
-    '<button onclick="window.print()" style="padding:12px 22px;background:#a37e20;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;font-family:DM Sans,sans-serif;letter-spacing:.3px">\ud83d\udda8 Print / Save PDF</button>'+
-    '<button onclick="window.close()" style="padding:12px 18px;background:#faf6ee;color:#5e5848;border:1px solid rgba(0,0,0,.12);border-radius:10px;font-size:12px;cursor:pointer;font-family:DM Sans,sans-serif">\u2715</button>'+
-    '</div>';
-
-  const full = '<!DOCTYPE html><html lang="en"><head>'+
-    '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">'+
-    '<title>Saarthi Pulse &middot; '+dateStr+'</title>'+
-    '<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">'+
-    '<style>'+CSS+'</style></head>'+
-    '<body><div class="page">'+H+'</div>'+printBtn+'</body></html>';
-
-  const win = window.open('','_blank','width=950,height=780');
+  const win = window.open('','_blank','width=960,height=820');
   if(!win){ toast('Allow popups to view the report','err'); return; }
-  win.document.write(full);
+  win.document.write(FULL);
   win.document.close();
-  toast('Pulse Report ready \u2014 click Print / Save PDF','info');
+  toast('Pulse Report ready - click Print / Save PDF','info');
 }
 
-
-function _downloadPicksCsv(csv, filename) {
-  const blob = new Blob([csv], {type:'text/csv'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-}
 </script>
 </body>
 </html>
