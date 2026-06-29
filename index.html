@@ -2433,8 +2433,7 @@ async function _liveStockAnalyser() {
   });
 
   h+='</tbody></table></div>';
-  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">&#x21BB; Refresh</button>
-        <button onclick="generatePulseReportPDF()" class="btn btn-ghost btn-xs" style="border-color:var(--gold);color:var(--gold3);font-weight:700">&#128196; Pulse Report</button></div>`;
+  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">&#x21BB; Refresh</button></div>`;
   h+='</div>';
   return h;
 }
@@ -11650,6 +11649,7 @@ function renderLive(el) {
         ${hasScreener?`<span style="padding:4px 10px;border-radius:20px;font-size:9px;font-weight:700;background:var(--glt);color:var(--gold2);border:1px solid var(--gbdr)">📊 Screener Loaded</span>`:''}
         ${kiteOk?`<button onclick="kiteAuth()" class="btn btn-ghost btn-xs" style="font-size:10px;border-color:var(--green);color:var(--green)">↻ Reconnect Kite</button>`:`<button onclick="kiteAuth()" class="btn btn-gold btn-xs" style="font-size:10px">⚡ Connect Kite</button>`}
         <button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">↻</button>
+        <button onclick="generatePulseReportPDF()" style="padding:5px 16px;border:1.5px solid var(--gold);border-radius:20px;background:var(--glt);color:var(--gold3);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">&#128196; Pulse Report</button>
       </div>
     </div>
   </div>`;
@@ -34514,12 +34514,56 @@ async function _buildPulseReport(){
   const todayPicks = _DAILY_PICKS_CACHE[todayKey]||_DAILY_PICKS_CACHE[pickDates[0]];
   const latestPickDate = todayPicks === _DAILY_PICKS_CACHE[todayKey] ? todayKey : pickDates[0];
 
+  const enrichPick = s => {
+    const sd = _SCREENER_DATA[s.sym]||{};
+    const k  = kiteOHLC[s.sym]||{};
+    const prev = k.prevClose||k.last||0;
+    const rng = (k.high52&&k.low52&&k.high52>k.low52);
+    return {...s, roe:sd.roe, roce:sd.roce, pe:sd.pe, peg:sd.peg,
+      debtEq:sd.debtEq, pg:sd.profitGrowth3Y, sg:sd.salesGrowth3Y,
+      r1:sd.return1Y, r3:sd.return3Y,
+      dayChg: prev>0?(((k.last||prev)-prev)/prev*100):null,
+      rp: rng?Math.round(((k.last||0)-k.low52)/(k.high52-k.low52)*100):null,
+      last:k.last, tScore:s.score, fScore:null};
+  };
+  const pickRationale = (s, type) => {
+    const pts = [];
+    if(type==='tech'||type==='both') {
+      if(s.dayChg!=null&&s.dayChg>0.5) pts.push('Momentum +'+(s.dayChg).toFixed(1)+'% today');
+      else if(s.dayChg!=null&&s.dayChg>-1) pts.push('Stable price action');
+      if(s.rp!=null&&s.rp>60) pts.push('Near 52w high ('+s.rp+'th pct)');
+      if(s.r1!=null&&s.r1>20) pts.push('1Y return +'+(s.r1).toFixed(0)+'%');
+      if(s.r3!=null&&s.r3>40) pts.push('3Y +'+(s.r3).toFixed(0)+'%');
+    }
+    if(type==='funda'||type==='both') {
+      if(s.roe!=null&&s.roe>18) pts.push('ROE '+(s.roe).toFixed(0)+'%');
+      if(s.roce!=null&&s.roce>18) pts.push('ROCE '+(s.roce).toFixed(0)+'%');
+      if(s.pg!=null&&s.pg>15) pts.push('Profit growth +'+(s.pg).toFixed(0)+'% (3Y)');
+      if(s.pe!=null&&s.pe>0&&s.pe<25) pts.push('PE '+(s.pe).toFixed(0)+'x');
+      if(s.peg!=null&&s.peg<1.5) pts.push('PEG '+(s.peg).toFixed(1));
+      if(s.debtEq!=null&&s.debtEq<0.3) pts.push('Low debt D/E '+(s.debtEq).toFixed(1)+'x');
+    }
+    return pts.length?pts.join(' &middot; '):'Score '+(s.score||'--')+'/100';
+  };
+  const exitRationale = (s) => {
+    const pts = [];
+    const d = s.d||{};
+    if(s.tScore!=null&&s.tScore<15) pts.push('Weak momentum (T:'+(s.tScore)+'/50)');
+    if(s.fScore!=null&&s.fScore<10) pts.push('Weak fundamentals (F:'+(s.fScore)+'/50)');
+    if(d.pe&&d.pe>60) pts.push('Expensive PE '+(d.pe).toFixed(0)+'x');
+    if(d.debtEq&&d.debtEq>1.5) pts.push('High debt D/E '+(d.debtEq).toFixed(1)+'x');
+    if(d.roe&&d.roe<8) pts.push('Low ROE '+(d.roe).toFixed(0)+'%');
+    if(d.return1Y&&d.return1Y<-10) pts.push('1Y return '+(d.return1Y).toFixed(0)+'%');
+    return pts.length?pts.join(' &middot; '):'Combined score: '+(s.score||'--')+'/100';
+  };
+
+
   // Worst signals from screener
   const allSyms = Object.keys(_SCREENER_DATA).filter(s=>!_EXCLUDED_SYMS.has(s));
   const pmsSet  = new Set(clients.flatMap(c=>(c.holdings||[]).map(h=>h.symbol)));
-  const worstB  = allSyms.map(s=>{const t=_techScore(s);const f=_fundaScore(s);if(!t||!f)return null;return{sym:s,score:Math.round(f.score/2+t.score),inPMS:pmsSet.has(s)};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
-  const worstT  = allSyms.map(s=>{const t=_techScore(s);if(!t)return null;return{sym:s,score:t.score,inPMS:pmsSet.has(s)};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
-  const worstF  = allSyms.map(s=>{const f=_fundaScore(s);if(!f)return null;return{sym:s,score:f.score,inPMS:pmsSet.has(s)};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
+  const worstB  = allSyms.map(s=>{const t=_techScore(s);const f=_fundaScore(s);if(!t||!f)return null;const sd=_SCREENER_DATA[s]||{};return{sym:s,tScore:t.score,fScore:Math.round((f.score||0)/2),score:Math.round((f.score||0)/2+t.score),inPMS:pmsSet.has(s),d:sd};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
+  const worstT  = allSyms.map(s=>{const t=_techScore(s);const f=_fundaScore(s);if(!t||!f)return null;return{sym:s,tScore:t.score,fScore:Math.round((f.score||0)/2),score:t.score,inPMS:pmsSet.has(s),d:_SCREENER_DATA[s]||{}};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5);
+  const worstF  = allSyms.map(s=>{const f=_fundaScore(s);const t=_techScore(s);if(!f||!t)return null;return{sym:s,tScore:t.score,fScore:Math.round((f.score||0)/2),score:f.score,inPMS:pmsSet.has(s),d:_SCREENER_DATA[s]||{}};}).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0,5)
 
   // Screener universe metrics
   const scrMetrics = {};
