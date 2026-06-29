@@ -1,6 +1,6 @@
-<!DOCTYPE html><!-- v1781604339 -->
+<!DOCTYPE html><!-- v1782725331 -->
 <html lang="en">
-<head><!-- AstroQuant v2.2 -->
+<head><!-- v1782725331-pulse -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
@@ -34503,8 +34503,8 @@ async function _buildPulseReport() {
   // Helpers
   const SC = s => s==null?'#999':s>=70?'#1a6e3a':s>=45?'#9a5208':'#b83228';
   const WC = r => r==null?'#999':r>=60?'#1a6e3a':r>=45?'#9a5208':'#b83228';
-  const FMT = (n,d) => n==null?'&mdash;':(n>=0?'+':'')+n.toFixed(d||2)+'%';
-  const CR = n => n==null?'&mdash;':'\u20b9'+(Math.abs(n)/10000000).toFixed(1)+'Cr';
+  const FMT = (n,d) => n==null?'--':(n>=0?'+':'')+n.toFixed(d||2)+'%';
+  const CR = n => n==null?'--':'\u20b9'+(Math.abs(n)/10000000).toFixed(1)+'Cr';
 
   const chip = (sym, inPMS, bg, fg, bdr) =>
     '<span style="display:inline-block;margin:2px;padding:3px 10px;border-radius:6px;font-size:10px;font-weight:600;background:'+bg+';color:'+fg+';border:1px solid '+bdr+'">'+
@@ -34568,12 +34568,12 @@ async function _buildPulseReport() {
       H += '</div></div>';
     }
     if(picksTech.length) {
-      H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#185fa5;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\ud83d\udcc8 Technically Strong &mdash; Momentum Leaders</div><div>';
+      H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#185fa5;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">(+) Technically Strong &mdash; Momentum Leaders</div><div>';
       picksTech.forEach(s=>{ H += chip(s.sym,s.inPMS,'#e6f1fb','#185fa5','rgba(24,95,165,.2)'); });
       H += '</div></div>';
     }
     if(picksFunda.length) {
-      H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#1a6e3a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\ud83c\udfe6 Fundamentally Strong &mdash; Quality Companies</div><div>';
+      H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#1a6e3a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">(B) Fundamentally Strong &mdash; Quality Companies</div><div>';
       picksFunda.forEach(s=>{ H += chip(s.sym,s.inPMS,'#ecf7f0','#1a6e3a','rgba(26,110,58,.2)'); });
       H += '</div></div>';
     }
@@ -34588,7 +34588,7 @@ async function _buildPulseReport() {
     H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#b83228;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\u26a0 Weakest Combined &mdash; Review for Exit</div><div>';
     worstB.forEach(s=>{ H += chip(s.sym,s.inPMS,'#fdf1ef','#b83228','rgba(184,50,40,.2)') + '<span style="font-size:9px;color:#9e9480;margin-right:4px">'+s.score+'/100</span>'; });
     H += '</div></div>';
-    H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#b83228;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\ud83d\udcc9 Technically Weak</div><div>';
+    H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#b83228;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">(-) Technically Weak</div><div>';
     worstT.forEach(s=>{ H += chip(s.sym,s.inPMS,'#fdf1ef','#b83228','rgba(184,50,40,.2)'); });
     H += '</div></div>';
     H += '<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:700;color:#9a5208;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">\ud83d\udce6 Fundamentally Weak</div><div>';
@@ -34677,7 +34677,7 @@ async function _buildPulseReport() {
   H += '</div>';
 
   if(flags.length) {
-    const FM = {CONCENTRATION:{i:'\u26a0',l:'Concentration Risk'},UNDERPERFORM:{i:'\ud83d\udcc9',l:'Underperformance'},CASH_IDLE:{i:'\ud83d\udcb0',l:'Idle Cash'},HIGH_PE:{i:'\ud83d\udcc8',l:'High PE Exposure'},STALE:{i:'\ud83d\udd70',l:'No Activity'},SIP_LAPSE:{i:'\ud83d\udd14',l:'SIP Risk'}};
+    const FM = {CONCENTRATION:{i:'\u26a0',l:'Concentration Risk'},UNDERPERFORM:{i:'(-)',l:'Underperformance'},CASH_IDLE:{i:'($)',l:'Idle Cash'},HIGH_PE:{i:'(+)',l:'High PE Exposure'},STALE:{i:'(t)',l:'No Activity'},SIP_LAPSE:{i:'(!)',l:'SIP Risk'}};
     H += '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#9e9480;margin-bottom:8px">Clients Requiring Attention</div>';
     flags.slice(0,8).forEach(f=>{
       const m = FM[f.flag_type]||{i:'\u26a0',l:f.flag_type};
@@ -34763,7 +34763,7 @@ async function _buildPulseReport() {
   ].join('');
 
   const printBtn = '<div class="no-print" style="position:fixed;bottom:24px;right:24px;display:flex;gap:8px;z-index:9999;filter:drop-shadow(0 4px 12px rgba(0,0,0,.15))">'+
-    '<button onclick="window.print()" style="padding:12px 22px;background:#a37e20;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;font-family:DM Sans,sans-serif;letter-spacing:.3px">\ud83d\udda8 Print / Save PDF</button>'+
+    '<button onclick="window.print()" style="padding:12px 22px;background:#a37e20;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;font-family:DM Sans,sans-serif;letter-spacing:.3px">Print Print / Save PDF</button>'+
     '<button onclick="window.close()" style="padding:12px 18px;background:#faf6ee;color:#5e5848;border:1px solid rgba(0,0,0,.12);border-radius:10px;font-size:12px;cursor:pointer;font-family:DM Sans,sans-serif">\u2715</button>'+
     '</div>';
 
