@@ -2433,8 +2433,7 @@ async function _liveStockAnalyser() {
   });
 
   h+='</tbody></table></div>';
-  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">&#x21BB; Refresh</button>
-        <button onclick="generatePulseReportPDF()" class="btn btn-ghost btn-xs" style="border-color:var(--gold);color:var(--gold3);font-weight:700">&#128196; Pulse Report</button></div>`;
+  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">&#x21BB; Refresh</button></div>`;
   h+='</div>';
   return h;
 }
@@ -11650,6 +11649,7 @@ function renderLive(el) {
         ${hasScreener?`<span style="padding:4px 10px;border-radius:20px;font-size:9px;font-weight:700;background:var(--glt);color:var(--gold2);border:1px solid var(--gbdr)">📊 Screener Loaded</span>`:''}
         ${kiteOk?`<button onclick="kiteAuth()" class="btn btn-ghost btn-xs" style="font-size:10px;border-color:var(--green);color:var(--green)">↻ Reconnect Kite</button>`:`<button onclick="kiteAuth()" class="btn btn-gold btn-xs" style="font-size:10px">⚡ Connect Kite</button>`}
         <button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">↻</button>
+        <button onclick="generatePulseReportPDF()" class="btn btn-ghost btn-xs" style="border-color:var(--gold);color:var(--gold3);font-weight:700">&#128196; Pulse Report</button>
       </div>
     </div>
   </div>`;
