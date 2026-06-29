@@ -12352,7 +12352,7 @@ async function _liveMorningBriefing() {
   }
 
   // ── Show today's picks banner ──
-  const _todayKeyBanner = _getTodayStr();
+  const _todayKeyBanner = _getTodayStr(); window._todayKeyBanner = _todayKeyBanner;
   if (!_kiteConnected && !_DAILY_PICKS_CACHE[_todayKeyBanner]) {
     html += `<div style="background:var(--glt);border:1.5px solid var(--gbdr);border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
       <div>
@@ -12374,7 +12374,7 @@ async function _liveMorningBriefing() {
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button onclick="nav('picks')" style="padding:5px 12px;border-radius:8px;background:var(--glt);border:1px solid var(--gbdr);color:var(--gold3);font-size:10px;font-weight:700;cursor:pointer">📅 History</button>
-          <button onclick="_downloadPicksCsv(window._lastPicksCsv,'picks_'+_todayKeyBanner+'.csv')" style="padding:5px 12px;border-radius:8px;background:var(--gold2);border:1px solid var(--gbdr);color:#fff;font-size:10px;font-weight:700;cursor:pointer">↓ Download</button>
+          <button onclick="_downloadPicksCsv(window._lastPicksCsv,'picks_'+window._todayKeyBanner+'.csv')" style="padding:5px 12px;border-radius:8px;background:var(--gold2);border:1px solid var(--gbdr);color:#fff;font-size:10px;font-weight:700;cursor:pointer">↓ Download</button>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
