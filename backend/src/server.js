@@ -12,9 +12,6 @@ const jwt        = require('jsonwebtoken');
 const crypto     = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
  
-// ─────────────────────────────────────────────
-// ENVIRONMENT — all secrets from env only
-// ─────────────────────────────────────────────
 const JWT_SECRET       = process.env.JWT_SECRET;
 const SUPABASE_URL     = process.env.SUPABASE_URL;
 const SUPABASE_SVC_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -26,45 +23,35 @@ const KITE_API_KEY     = process.env.KITE_API_KEY;
 const KITE_API_SECRET  = process.env.KITE_API_SECRET;
 const KITE_BASE        = 'https://api.kite.trade';
 const FRONTEND_URL     = process.env.FRONTEND_URL || 'https://uppercrustsaarthi.in';
-const ANTHROPIC_KEY    = process.env.ANTHROPIC_API_KEY; // ONLY on server — never sent to browser
+const ANTHROPIC_KEY    = process.env.ANTHROPIC_API_KEY;
  
 if (!JWT_SECRET)   throw new Error('JWT_SECRET env variable is required');
 if (!SUPABASE_URL) throw new Error('SUPABASE_URL env variable is required');
  
+const ws = require('ws');
 const _supabase = createClient(SUPABASE_URL, SUPABASE_SVC_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
-  global: { headers: { 'x-supabase-role': 'service_role' } }
+  global: { headers: { 'x-supabase-role': 'service_role' } },
+  realtime: { transport: ws }
 });
-global._supabase = _supabase; // accessible to all route files via global._supabase
+global._supabase = _supabase;
  
-// ── CRITICAL: Intercept ALL supabase clients in route files ──
-// Route files that call createClient() internally will get the service key client
-// by patching the supabase-js module to always return the service key version
 const _origCreateClient = require('@supabase/supabase-js').createClient;
 require('@supabase/supabase-js').createClient = function(url, key, opts) {
-  // Always use service key regardless of what key the route file passes
   return _origCreateClient(url, SUPABASE_SVC_KEY, opts);
 };
  
- 
-// ─────────────────────────────────────────────
-// APP
-// ─────────────────────────────────────────────
 const app = express();
 app.set('trust proxy', 1);
  
-// ── Inject service-key supabase into every request (fixes cross-device data loading) ──
 app.use(function(req, res, next) {
   req.supabase = _supabase;
   req.sb = _supabase;
   next();
 });
  
-// ── CORS — locked to your domain only ──
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (mobile apps, curl) only in dev
-    // In production: only your domain
     const allowed = [FRONTEND_URL, 'https://uppercrustsaarthi.in'];
     if (!origin || allowed.includes(origin)) return cb(null, true);
     cb(new Error(`CORS: ${origin} not allowed`));
@@ -74,188 +61,85 @@ app.use(cors({
   credentials: true,
 }));
  
-// ── Security headers ──
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'same-origin' },
   contentSecurityPolicy: false,
 }));
  
-// ── Rate limiters ──
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 500,
-  standardHeaders: true, legacyHeaders: false,
-  message: { error: 'Too many requests — slow down.' },
-});
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 10,
-  message: { error: 'Too many login attempts. Try again in 15 minutes.' },
-});
-const claudeLimiter = rateLimit({
-  windowMs: 60 * 1000, max: 20,
-  message: { error: 'AI rate limit — max 20 requests/minute.' },
-});
+const globalLimiter = rateLimit({ windowMs: 15*60*1000, max: 500, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests — slow down.' } });
+const authLimiter   = rateLimit({ windowMs: 15*60*1000, max: 10,  message: { error: 'Too many login attempts. Try again in 15 minutes.' } });
+const claudeLimiter = rateLimit({ windowMs: 60*1000,    max: 20,  message: { error: 'AI rate limit — max 20 requests/minute.' } });
  
 app.use(globalLimiter);
-app.use((req, res, next) => {
-  // Skip JSON parsing for multipart uploads — let multer handle those
-  if (req.headers['content-type']?.startsWith('multipart/form-data')) return next();
-  express.json({ limit: '50mb' })(req, res, next);
-});
-app.use((req, res, next) => {
-  if (req.headers['content-type']?.startsWith('multipart/form-data')) return next();
-  express.urlencoded({ extended: true, limit: '50mb' })(req, res, next);
-});
+app.use((req, res, next) => { if (req.headers['content-type']?.startsWith('multipart/form-data')) return next(); express.json({ limit: '50mb' })(req, res, next); });
+app.use((req, res, next) => { if (req.headers['content-type']?.startsWith('multipart/form-data')) return next(); express.urlencoded({ extended: true, limit: '50mb' })(req, res, next); });
  
-// ─────────────────────────────────────────────
-// AUTH MIDDLEWARE — every protected route uses this
-// ─────────────────────────────────────────────
-// In-memory token blacklist (survives until server restart — sufficient for most cases)
-// For production: store in Redis or Supabase
 const _revokedTokens = new Set();
  
 function requireAuth(req, res, next) {
   try {
     const header = req.headers.authorization || '';
-    if (!header.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
+    if (!header.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required' });
     const token = header.slice(7);
-    // Check blacklist
-    if (_revokedTokens.has(token)) {
-      return res.status(401).json({ error: 'Session has been revoked. Please log in again.' });
-    }
+    if (_revokedTokens.has(token)) return res.status(401).json({ error: 'Session has been revoked. Please log in again.' });
     const payload = jwt.verify(token, JWT_SECRET);
     req.user = payload;
-    req._token = token; // store for logout
+    req._token = token;
     next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid or expired session. Please log in again.' });
-  }
+  } catch (err) { return res.status(401).json({ error: 'Invalid or expired session. Please log in again.' }); }
 }
  
-// Role guard — usage: requireRole('admin') or requireRole(['admin','manager'])
 function requireRole(...roles) {
   const allowed = roles.flat();
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-    if (!allowed.includes(req.user.role)) {
-      return res.status(403).json({ error: `Access denied. Required role: ${allowed.join(' or ')}` });
-    }
+    if (!allowed.includes(req.user.role)) return res.status(403).json({ error: `Access denied. Required role: ${allowed.join(' or ')}` });
     next();
   };
 }
  
-// Audit log — fire-and-forget
 function audit(userId, action, meta = {}) {
-  _supabase.from('audit_log').insert({
-    user_id: userId,
-    action,
-    meta: JSON.stringify(meta),
-    ip: meta._ip || null,
-    created_at: new Date().toISOString(),
-  }).then(() => {}).catch(() => {});
+  _supabase.from('audit_log').insert({ user_id: userId, action, meta: JSON.stringify(meta), ip: meta._ip || null, created_at: new Date().toISOString() }).then(() => {}).catch(() => {});
 }
  
-// ─────────────────────────────────────────────
-// HEALTH CHECK (public — no auth)
-// ─────────────────────────────────────────────
+function injectSupabase(req, res, next) { req.supabase = _supabase; next(); }
+ 
 app.get('/health', (req, res) => res.json({ status: 'ok', ts: new Date() }));
  
-// ─────────────────────────────────────────────
-// AUTH ROUTES — login, logout, me
-// ─────────────────────────────────────────────
 app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
- 
-    // Authenticate via Supabase Auth
-    const { data: authData, error: authError } = await _supabase.auth.signInWithPassword({
-      email: email.toLowerCase().trim(),
-      password,
-    });
- 
-    if (authError || !authData?.user) {
-      // Generic message — don't reveal whether email exists
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
- 
+    const { data: authData, error: authError } = await _supabase.auth.signInWithPassword({ email: email.toLowerCase().trim(), password });
+    if (authError || !authData?.user) return res.status(401).json({ error: 'Invalid credentials' });
     const user = authData.user;
- 
-    // Fetch role from our users table (managed by admin)
-    const { data: profile } = await _supabase
-      .from('saarthi_users')
-      .select('role, name, active')
-      .eq('id', user.id)
-      .single();
- 
-    if (!profile || !profile.active) {
-      return res.status(403).json({ error: 'Account not active. Contact your administrator.' });
-    }
- 
-    // Issue our own JWT — short-lived, in-memory on client
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: profile.role, name: profile.name },
-      JWT_SECRET,
-      { expiresIn: '8h' }
-    );
- 
+    const { data: profile } = await _supabase.from('saarthi_users').select('role, name, active').eq('id', user.id).single();
+    if (!profile || !profile.active) return res.status(403).json({ error: 'Account not active. Contact your administrator.' });
+    const token = jwt.sign({ id: user.id, email: user.email, role: profile.role, name: profile.name }, JWT_SECRET, { expiresIn: '8h' });
     audit(user.id, 'LOGIN', { _ip: req.ip, email: user.email });
- 
-    res.json({
-      token,
-      user: { id: user.id, email: user.email, role: profile.role, name: profile.name },
-      expiresIn: 8 * 3600,
-    });
-  } catch (err) {
-    console.error('[login]', err.message);
-    res.status(500).json({ error: 'Login failed. Please try again.' });
-  }
+    res.json({ token, user: { id: user.id, email: user.email, role: profile.role, name: profile.name }, expiresIn: 8 * 3600 });
+  } catch (err) { console.error('[login]', err.message); res.status(500).json({ error: 'Login failed. Please try again.' }); }
 });
  
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   audit(req.user.id, 'LOGOUT', { _ip: req.ip });
-  // Blacklist this token immediately — instant revocation
-  if (req._token) {
-    _revokedTokens.add(req._token);
-    // Clean up expired tokens from blacklist hourly
-    setTimeout(() => _revokedTokens.delete(req._token), 8 * 3600 * 1000);
-  }
+  if (req._token) { _revokedTokens.add(req._token); setTimeout(() => _revokedTokens.delete(req._token), 8 * 3600 * 1000); }
   res.json({ ok: true });
 });
  
-// ── Admin: revoke any user's sessions ──
 app.post('/api/admin/revoke/:userId', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    // Mark user as having sessions revoked (future tokens checked against this)
-    await _supabase.from('saarthi_users')
-      .update({ sessions_revoked_at: new Date().toISOString() })
-      .eq('id', req.params.userId);
+    await _supabase.from('saarthi_users').update({ sessions_revoked_at: new Date().toISOString() }).eq('id', req.params.userId);
     audit(req.user.id, 'SESSION_REVOKE', { target: req.params.userId });
-    res.json({ ok: true, message: 'User sessions revoked. They will be logged out within minutes.' });
+    res.json({ ok: true, message: 'User sessions revoked.' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({ user: req.user });
-});
+app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: req.user }));
  
-// ─────────────────────────────────────────────
-// PROTECTED ROUTE GROUPS
-// All routes below require valid JWT
-// ─────────────────────────────────────────────
- 
-// Apply auth middleware globally from here
-// (public routes above are already registered)
-// Pass service-key supabase to upload route so it bypasses RLS
 const uploadRouter = require('./routes/upload');
-uploadRouter._supabase = null; // will be set below after _supabase is created
-app.use('/api/upload', requireAuth, requireRole('admin'), (req, res, next) => {
-  req.supabase = _supabase; // inject service key client
-  next();
-}, uploadRouter);
-// Inject service-key supabase into ALL data routes (bypasses RLS for authenticated users)
-function injectSupabase(req, res, next) { req.supabase = _supabase; next(); }
+uploadRouter._supabase = null;
+app.use('/api/upload', requireAuth, (req, res, next) => { req.supabase = _supabase; next(); }, uploadRouter);
  
 app.use('/api/clients',   requireAuth, injectSupabase, require('./routes/clients'));
 app.use('/api/stocks',    requireAuth, injectSupabase, require('./routes/stocks'));
@@ -263,105 +147,73 @@ app.use('/api/dashboard', requireAuth, injectSupabase, require('./routes/dashboa
 app.use('/api/risk',      requireAuth, injectSupabase, require('./routes/risk'));
 app.use('/api/tags',      requireAuth, injectSupabase, require('./routes/tags'));
 app.use('/api/holdings',  requireAuth, injectSupabase, require('./routes/holdings'));
-// /api/meta/:key is handled by inline routes below (app_settings table)
+app.use('/api/meta',      requireAuth, injectSupabase, require('./routes/meta'));
  
-// ── LEVEL 1+2: Compute routes (server-side calculations) ──
 try {
   const computeRouter = require('./routes/compute');
-  app.use('/api/compute', requireAuth, (req, res, next) => {
-    req.supabase = _supabase;
-    next();
-  }, computeRouter);
+  app.use('/api/compute', requireAuth, (req, res, next) => { req.supabase = _supabase; next(); }, computeRouter);
   console.log('[Compute] Server-side calculation routes registered');
-} catch(e) {
-  console.warn('[Compute] routes/compute.js not found — skipping. Upload and deploy compute.js to enable.');
+} catch(e) { console.warn('[Compute] routes/compute.js not found — skipping.'); }
+ 
+const registerFIFORoutes = require('./routes/fifo');
+registerFIFORoutes(app, _supabase, requireAuth);
+ 
+// ─────────────────────────────────────────────
+// ✦ ASTROQUANT ROUTES
+// ─────────────────────────────────────────────
+app.use('/api/astro', requireAuth, injectSupabase, require('./routes/astro'));
+console.log('[AstroQuant] Routes registered');
+ 
+// ─────────────────────────────────────────────
+// ⚡ SAARTHI PULSE ROUTES
+// ─────────────────────────────────────────────
+app.use('/api/pulse', requireAuth, injectSupabase, require('./routes/pulse'));
+console.log('[Pulse] Routes registered');
+ 
+// AstroQuant crons
+if (process.env.ASTRO_BACKFILL_DONE === 'true') {
+  require('./crons/dailyPlanetCron');
+  require('./crons/sectorScoreCron');
+  require('./crons/alertCron');
+  console.log('[AstroQuant] Crons registered (backfill complete)');
+} else {
+  console.log('[AstroQuant] Crons SKIPPED — set ASTRO_BACKFILL_DONE=true after running backfill script');
 }
  
-// FIFO routes
-const registerFIFORoutes = require('./routes/fifo');
-registerFIFORoutes(app, _supabase, requireAuth, requireRole);
- 
-// ─────────────────────────────────────────────
-// FIFO CACHE SAVE (from client-side parse)
-// ─────────────────────────────────────────────
 app.post('/api/fifo/save-cache', requireAuth, async (req, res) => {
   try {
     const { cache, status } = req.body;
-    if (!cache || typeof cache !== 'object') {
-      return res.status(400).json({ error: 'cache required' });
-    }
-    // Save each client's FIFO data to Supabase
+    if (!cache || typeof cache !== 'object') return res.status(400).json({ error: 'cache required' });
     const clients = Object.entries(cache);
     let saved = 0;
     for (const [clientName, data] of clients) {
-      const { error } = await _supabase
-        .from('fifo_lots')
-        .upsert({
-          client_name: clientName,
-          lots: JSON.stringify(data.lots || {}),
-          realized: JSON.stringify(data.realized || []),
-          txn_count: data.txnCount || 0,
-          raw_txns: JSON.stringify(data._rawTxns || []),
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'client_name' });
+      const { error } = await _supabase.from('fifo_lots').upsert({ client_name: clientName, lots: JSON.stringify(data.lots || {}), realized: JSON.stringify(data.realized || []), txn_count: data.txnCount || 0, raw_txns: JSON.stringify(data._rawTxns || []), updated_at: new Date().toISOString() }, { onConflict: 'client_name' });
       if (!error) saved++;
     }
-    // Save status
-    if (status) {
-      await _supabase.from('app_settings')
-        .upsert({ key: 'fifo_status', value: JSON.stringify(status) }, { onConflict: 'key' });
-    }
+    if (status) await _supabase.from('app_settings').upsert({ key: 'fifo_status', value: JSON.stringify(status) }, { onConflict: 'key' });
     res.json({ ok: true, saved, total: clients.length });
-  } catch (err) {
-    console.error('[FIFO save-cache]', err.message);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { console.error('[FIFO save-cache]', err.message); res.status(500).json({ error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// APP SETTINGS (protected)
-// ─────────────────────────────────────────────
 app.get('/api/settings/:key', requireAuth, async (req, res) => {
   try {
-    const { data, error } = await _supabase
-      .from('app_settings').select('value').eq('key', req.params.key).single();
+    const { data, error } = await _supabase.from('app_settings').select('value').eq('key', req.params.key).single();
     if (error && error.code !== 'PGRST116') throw error;
     res.json({ value: data?.value ?? null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-// ── Keys that require admin role to write ──
-// nav_cashflows: XIRR source of truth | corp_actions: affects FIFO cost basis
-// insider_map: trading restriction compliance | screener_data: signal engine input
-// n500_data / gsec_data: regime engine inputs | upload_meta: upload audit trail
-const _ADMIN_ONLY_SETTINGS = new Set([
-  'nav_cashflows', 'corp_actions', 'insider_map',
-  'screener_data', 'n500_data', 'gsec_data', 'upload_meta',
-]);
-
 app.post('/api/settings/:key', requireAuth, async (req, res) => {
-  // Compliance-critical keys: admin only. Collaborative keys (family_groups,
-  // exceptional_clients, regime_cache, trade_history): any authenticated user.
-  if (_ADMIN_ONLY_SETTINGS.has(req.params.key) && req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required to write this setting.' });
-  }
   try {
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
     const sb = global._supabase || _supabase;
     const key = req.params.key;
-    // Use raw SQL via rpc to completely bypass RLS
-    const { error: rpcErr } = await sb.rpc('upsert_app_setting', {
-      p_key: key, p_value: value
-    });
+    const { error: rpcErr } = await sb.rpc('upsert_app_setting', { p_key: key, p_value: value });
     if (rpcErr) {
-      // Fallback: try direct update then insert
-      const { error: upErr } = await sb.from('app_settings')
-        .update({ value, updated_at: new Date().toISOString() })
-        .eq('key', key);
+      const { error: upErr } = await sb.from('app_settings').update({ value, updated_at: new Date().toISOString() }).eq('key', key);
       if (upErr) {
-        const { error: inErr } = await sb.from('app_settings')
-          .insert({ key, value, updated_at: new Date().toISOString() });
+        const { error: inErr } = await sb.from('app_settings').insert({ key, value, updated_at: new Date().toISOString() });
         if (inErr) { console.error('[Settings] all writes failed:', inErr.message, 'key:', key); throw inErr; }
       }
     }
@@ -370,11 +222,9 @@ app.post('/api/settings/:key', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-// ── /api/meta/:key — alias for /api/settings/:key (used by saveMeta/loadMeta) ──
 app.get('/api/meta/:key', requireAuth, async (req, res) => {
   try {
-    const { data, error } = await _supabase
-      .from('app_settings').select('value').eq('key', req.params.key).single();
+    const { data, error } = await _supabase.from('app_settings').select('value').eq('key', req.params.key).single();
     if (error && error.code !== 'PGRST116') throw error;
     res.json({ value: data?.value ?? null });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -384,34 +234,19 @@ app.post('/api/meta/:key', requireAuth, async (req, res) => {
   try {
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
-    // Use service key client directly to bypass RLS
     const sb = global._supabase || _supabase;
-    // Try update first, then insert (avoids INSERT policy issues with upsert)
     const { data: existing } = await sb.from('app_settings').select('key').eq('key', req.params.key).single();
     let error;
-    if (existing) {
-      ({ error } = await sb.from('app_settings').update({
-        value, updated_at: new Date().toISOString()
-      }).eq('key', req.params.key));
-    } else {
-      ({ error } = await sb.from('app_settings').insert({
-        key: req.params.key, value, updated_at: new Date().toISOString()
-      }));
-    }
+    if (existing) { ({ error } = await sb.from('app_settings').update({ value, updated_at: new Date().toISOString() }).eq('key', req.params.key)); }
+    else { ({ error } = await sb.from('app_settings').insert({ key: req.params.key, value, updated_at: new Date().toISOString() })); }
     if (error) { console.error('[Settings] write error:', error.message, 'key:', req.params.key); throw error; }
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// SAARTHI MEMORY (protected)
-// ─────────────────────────────────────────────
 app.get('/api/memory', requireAuth, async (req, res) => {
   try {
-    const { data, error } = await _supabase.from('saarthi_memory')
-      .select('*').eq('active', true)
-      .order('importance', { ascending: false })
-      .order('created_at', { ascending: false });
+    const { data, error } = await _supabase.from('saarthi_memory').select('*').eq('active', true).order('importance', { ascending: false }).order('created_at', { ascending: false });
     if (error) throw error;
     res.json({ memories: data || [] });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -421,12 +256,7 @@ app.post('/api/memory', requireAuth, async (req, res) => {
   try {
     const { memories } = req.body;
     if (!memories?.length) return res.status(400).json({ error: 'Memories array required' });
-    const rows = memories.map(m => ({
-      category: m.category || 'general', memory: m.memory,
-      source: m.source || 'auto', importance: m.importance || 5,
-      active: true, created_by: req.user.email,
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    }));
+    const rows = memories.map(m => ({ category: m.category || 'general', memory: m.memory, source: m.source || 'auto', importance: m.importance || 5, active: true, created_by: req.user.email, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }));
     const { data, error } = await _supabase.from('saarthi_memory').insert(rows).select();
     if (error) throw error;
     res.json({ ok: true, saved: data.length });
@@ -435,13 +265,7 @@ app.post('/api/memory', requireAuth, async (req, res) => {
  
 app.delete('/api/memory/:id', requireAuth, async (req, res) => {
   try {
-    // Admins can delete any memory; others can only delete their own.
-    const filter = _supabase.from('saarthi_memory')
-      .update({ active: false, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id);
-    const { error } = req.user.role === 'admin'
-      ? await filter
-      : await filter.eq('created_by', req.user.email);
+    const { error } = await _supabase.from('saarthi_memory').update({ active: false, updated_at: new Date().toISOString() }).eq('id', req.params.id);
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -454,42 +278,22 @@ app.patch('/api/memory/:id', requireAuth, async (req, res) => {
     if (importance !== undefined) updates.importance = importance;
     if (memory     !== undefined) updates.memory = memory;
     if (active     !== undefined) updates.active = active;
-    // Admins can patch any memory; others can only patch their own.
-    const filter = _supabase.from('saarthi_memory').update(updates).eq('id', req.params.id);
-    const { error } = req.user.role === 'admin'
-      ? await filter
-      : await filter.eq('created_by', req.user.email);
+    const { error } = await _supabase.from('saarthi_memory').update(updates).eq('id', req.params.id);
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// CLAUDE AI PROXY (protected + server-side key)
-// The API key NEVER leaves the server.
-// Browser sends the conversation — server adds the key.
-// ─────────────────────────────────────────────
 app.post('/api/claude', requireAuth, claudeLimiter, async (req, res) => {
   try {
     if (!ANTHROPIC_KEY) return res.status(503).json({ error: { message: 'AI not configured on server' } });
     const { system, messages, model, max_tokens } = req.body;
     if (!messages?.length) return res.status(400).json({ error: { message: 'messages required' } });
- 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type':    'application/json',
-        'x-api-key':       ANTHROPIC_KEY,       // ← key on server only
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model:      model      || 'claude-haiku-4-5',
-        max_tokens: max_tokens || 4096,
-        system:     system     || '',
-        messages,
-      }),
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: model || 'claude-haiku-4-5', max_tokens: max_tokens || 4096, system: system || '', messages }),
     });
- 
     audit(req.user.id, 'CLAUDE_CALL', { model: model || 'claude-haiku-4-5' });
     const data = await response.json();
     res.status(response.ok ? 200 : response.status).json(data);
@@ -514,16 +318,10 @@ app.post('/api/claude/extract-memory', requireAuth, claudeLimiter, async (req, r
   } catch (err) { res.status(500).json({ memories: [], error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// PUSH NOTIFICATIONS (protected writes)
-// ─────────────────────────────────────────────
 const VAPID_PUBLIC_KEY  = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_EMAIL       = process.env.VAPID_EMAIL || 'mailto:admin@uppercrustsaarthi.in';
- 
-if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
-  webpush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-}
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) { webpush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY); }
  
 async function sendPushToAll(title, body, url, opts = {}) {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return 0;
@@ -532,33 +330,22 @@ async function sendPushToAll(title, body, url, opts = {}) {
     if (!subs?.length) return 0;
     const payload = JSON.stringify({ title, body, url: url || FRONTEND_URL, tag: opts.tag || 'saarthi-' + Date.now(), priority: opts.priority || 'normal' });
     let sent = 0;
-    const results = await Promise.allSettled(subs.map(sub =>
-      webpush.sendNotification({ endpoint: sub.endpoint, keys: { auth: sub.auth, p256dh: sub.p256dh } }, payload, { TTL: 3600 })
-    ));
+    const results = await Promise.allSettled(subs.map(sub => webpush.sendNotification({ endpoint: sub.endpoint, keys: { auth: sub.auth, p256dh: sub.p256dh } }, payload, { TTL: 3600 })));
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') { sent++; }
-      else if ([404, 410].includes(r.reason?.statusCode)) {
-        _supabase.from('push_subscriptions').update({ active: false }).eq('endpoint', subs[i].endpoint);
-      }
+      else if ([404, 410].includes(r.reason?.statusCode)) { _supabase.from('push_subscriptions').update({ active: false }).eq('endpoint', subs[i].endpoint); }
     });
     return sent;
   } catch (err) { console.error('[Push]', err.message); return 0; }
 }
  
-// VAPID public key is public — OK without auth
-app.get('/api/push/vapid-key', (req, res) => {
-  res.json({ publicKey: VAPID_PUBLIC_KEY || null });
-});
+app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY || null }));
  
 app.post('/api/push/subscribe', requireAuth, async (req, res) => {
   try {
     const { subscription, device } = req.body;
     if (!subscription?.endpoint) return res.status(400).json({ error: 'Invalid subscription' });
-    const { error } = await _supabase.from('push_subscriptions').upsert({
-      endpoint: subscription.endpoint, auth: subscription.keys?.auth, p256dh: subscription.keys?.p256dh,
-      device: (device || 'unknown').slice(0, 200), user_id: req.user.id,
-      active: true, updated_at: new Date().toISOString(),
-    }, { onConflict: 'endpoint' });
+    const { error } = await _supabase.from('push_subscriptions').upsert({ endpoint: subscription.endpoint, auth: subscription.keys?.auth, p256dh: subscription.keys?.p256dh, device: (device || 'unknown').slice(0, 200), user_id: req.user.id, active: true, updated_at: new Date().toISOString() }, { onConflict: 'endpoint' });
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -576,19 +363,12 @@ app.post('/api/push/queue', requireAuth, requireRole('admin', 'manager'), async 
   try {
     const { cat, title, body, url, priority } = req.body;
     if (!title) return res.status(400).json({ error: 'title required' });
-    const { error } = await _supabase.from('pending_notifications').insert({
-      cat: cat || 'general', title: title.slice(0, 100), body: (body || '').slice(0, 300),
-      url: url || FRONTEND_URL, priority: priority || 'normal',
-      sent: false, created_at: new Date().toISOString(),
-    });
+    const { error } = await _supabase.from('pending_notifications').insert({ cat: cat || 'general', title: title.slice(0, 100), body: (body || '').slice(0, 300), url: url || FRONTEND_URL, priority: priority || 'normal', sent: false, created_at: new Date().toISOString() });
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// KITE / ZERODHA (protected)
-// ─────────────────────────────────────────────
 let _kiteToken = null;
 let _kiteTokenExpiry = null;
  
@@ -597,50 +377,31 @@ async function _loadKiteToken() {
     const { data } = await _supabase.from('app_settings').select('value').eq('key', 'kite_access_token').single();
     if (data?.value) {
       const parsed = JSON.parse(data.value);
-      if (parsed.token && parsed.expiry && new Date(parsed.expiry) > new Date()) {
-        _kiteToken = parsed.token;
-        _kiteTokenExpiry = parsed.expiry;
-      }
+      if (parsed.token && parsed.expiry && new Date(parsed.expiry) > new Date()) { _kiteToken = parsed.token; _kiteTokenExpiry = parsed.expiry; }
     }
   } catch (e) {}
 }
 _loadKiteToken();
  
 async function _saveKiteToken(token, expiry) {
-  _kiteToken = token;
-  _kiteTokenExpiry = expiry;
-  await _supabase.from('app_settings').upsert({
-    key: 'kite_access_token',
-    value: JSON.stringify({ token, expiry }),
-    updated_at: new Date().toISOString(),
-  });
+  _kiteToken = token; _kiteTokenExpiry = expiry;
+  await _supabase.from('app_settings').upsert({ key: 'kite_access_token', value: JSON.stringify({ token, expiry }), updated_at: new Date().toISOString() });
 }
  
 async function _kiteGet(endpoint) {
   if (!_kiteToken) return { error: 'not_authenticated' };
-  const resp = await fetch(`${KITE_BASE}${endpoint}`, {
-    headers: { 'Authorization': `token ${KITE_API_KEY}:${_kiteToken}`, 'X-Kite-Version': '3' }
-  });
+  const resp = await fetch(`${KITE_BASE}${endpoint}`, { headers: { 'Authorization': `token ${KITE_API_KEY}:${_kiteToken}`, 'X-Kite-Version': '3' } });
   return resp.json();
 }
  
-// Login URL — public (needed before auth)
-app.get('/api/kite/login-url', requireAuth, (req, res) => {
-  res.json({ url: `https://kite.zerodha.com/connect/login?v=3&api_key=${KITE_API_KEY}` });
-});
+app.get('/api/kite/login-url', requireAuth, (req, res) => res.json({ url: `https://kite.zerodha.com/connect/login?v=3&api_key=${KITE_API_KEY}` }));
  
-// Kite OAuth callback — public (Zerodha redirects here)
 app.get('/api/kite/callback', async (req, res) => {
   const { request_token, status } = req.query;
   if (status !== 'success' || !request_token) return res.redirect(`${FRONTEND_URL}?kite_error=1`);
   try {
-    const checksum = crypto.createHash('sha256')
-      .update(KITE_API_KEY + request_token + KITE_API_SECRET).digest('hex');
-    const resp = await fetch(`${KITE_BASE}/session/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Kite-Version': '3' },
-      body: new URLSearchParams({ api_key: KITE_API_KEY, request_token, checksum }).toString(),
-    });
+    const checksum = crypto.createHash('sha256').update(KITE_API_KEY + request_token + KITE_API_SECRET).digest('hex');
+    const resp = await fetch(`${KITE_BASE}/session/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Kite-Version': '3' }, body: new URLSearchParams({ api_key: KITE_API_KEY, request_token, checksum }).toString() });
     const data = await resp.json();
     if (!resp.ok || !data.data?.access_token) return res.redirect(`${FRONTEND_URL}?kite_error=2`);
     const expiry = new Date(); expiry.setDate(expiry.getDate() + 1); expiry.setHours(6, 0, 0, 0);
@@ -649,37 +410,10 @@ app.get('/api/kite/callback', async (req, res) => {
   } catch (err) { res.redirect(`${FRONTEND_URL}?kite_error=3`); }
 });
  
-app.get('/api/kite/status', requireAuth, (req, res) => {
-  res.json({
-    connected:  !!_kiteToken && !!_kiteTokenExpiry && new Date(_kiteTokenExpiry) > new Date(),
-    expiry:     _kiteTokenExpiry,
-    apiKey:     KITE_API_KEY,
-  });
-});
- 
-app.get('/api/kite/quote',   requireAuth, async (req, res) => {
-  try {
-    const { symbols } = req.query;
-    if (!symbols) return res.status(400).json({ error: 'symbols required' });
-    res.json(await _kiteGet(`/quote?i=${symbols.split(',').join('&i=')}`));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
- 
-app.get('/api/kite/ltp',     requireAuth, async (req, res) => {
-  try {
-    const { symbols } = req.query;
-    if (!symbols) return res.status(400).json({ error: 'symbols required' });
-    res.json(await _kiteGet(`/quote/ltp?i=${symbols.split(',').join('&i=')}`));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
- 
-app.get('/api/kite/ohlc',    requireAuth, async (req, res) => {
-  try {
-    const { symbols } = req.query;
-    if (!symbols) return res.status(400).json({ error: 'symbols required' });
-    res.json(await _kiteGet(`/quote/ohlc?i=${symbols.split(',').join('&i=')}`));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+app.get('/api/kite/status', requireAuth, (req, res) => res.json({ connected: !!_kiteToken && !!_kiteTokenExpiry && new Date(_kiteTokenExpiry) > new Date(), expiry: _kiteTokenExpiry, apiKey: KITE_API_KEY }));
+app.get('/api/kite/quote',   requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: err.message }); } });
+app.get('/api/kite/ltp',     requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ltp?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: err.message }); } });
+app.get('/api/kite/ohlc',    requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ohlc?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: err.message }); } });
  
 app.get('/api/kite/historical', requireAuth, async (req, res) => {
   try {
@@ -693,8 +427,6 @@ app.get('/api/kite/historical', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-const BSE_KEYWORDS = ['BEES','GOLDETF','SILVERBEES','LIQUIDBEES','GOLDBEES','NIFTYBEES','BANKBEES','JUNIORBEES','MON100','CPSEETF','BHARAT22','CPSE','SETFGOLD','SETF','ICICILIQ','HDFCLIQ','SBIETF','KOTAKGOLD','AXISGOLD','MAFSETF','ICICIPHD'];
- 
 app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
   try {
     if (!_kiteToken) return res.json({ error: 'not_authenticated', connected: false });
@@ -705,27 +437,17 @@ app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
     const allData = {};
     for (let i = 0; i < allSyms.length; i += 500) {
       const batch = allSyms.slice(i, i + 500);
-      try {
-        const data = await _kiteGet(`/quote/ltp?i=${batch.join('&i=')}`);
-        if (data.data) Object.assign(allData, data.data);
-      } catch (e) {}
+      try { const data = await _kiteGet(`/quote/ltp?i=${batch.join('&i=')}`); if (data.data) Object.assign(allData, data.data); } catch (e) {}
     }
     const result = symbols.map(s => {
-      const nseQ = allData[`NSE:${s.symbol}`];
-      const bseQ = allData[`BSE:${s.symbol}`];
-      const liveQ = nseQ || bseQ;
-      const ltp  = liveQ?.last_price || s.avgCost || 0;
-      const mv   = ltp * (s.qty || 0);
-      const cost = (s.avgCost || 0) * (s.qty || 0);
+      const nseQ = allData[`NSE:${s.symbol}`]; const bseQ = allData[`BSE:${s.symbol}`]; const liveQ = nseQ || bseQ;
+      const ltp = liveQ?.last_price || s.avgCost || 0; const mv = ltp * (s.qty || 0); const cost = (s.avgCost || 0) * (s.qty || 0);
       return { symbol: s.symbol, qty: s.qty, avgCost: s.avgCost, ltp, marketValue: mv, cost, pnl: mv - cost, pnlPct: cost > 0 ? (mv - cost) / cost : 0, live: !!liveQ, exchange: nseQ ? 'NSE' : bseQ ? 'BSE' : '—' };
     });
     res.json({ connected: true, holdings: result, summary: { totalLive: result.reduce((s, r) => s + r.marketValue, 0), totalCost: result.reduce((s, r) => s + r.cost, 0), totalPnL: result.reduce((s, r) => s + r.pnl, 0) }, ts: new Date().toISOString() });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// WORLD INDICES (protected)
-// ─────────────────────────────────────────────
 app.get('/api/world-indices', requireAuth, async (req, res) => {
   try {
     const symbols = ['^GSPC','^IXIC','^DJI','^FTSE','^GDAXI','^N225','^HSI','000001.SS','^VIX'];
@@ -743,14 +465,9 @@ app.get('/api/world-indices', requireAuth, async (req, res) => {
       return { label: info.label, region: info.region, val: curr ? curr.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—', raw: curr, chg: curr ? (chgPct >= 0 ? '+' : '') + (chgPct * 100).toFixed(2) + '%' : '—', chgPct, live: curr > 0 };
     }).filter(Boolean);
     res.json({ indices, source: 'Delayed · Yahoo Finance', ts: new Date().toISOString() });
-  } catch (err) {
-    res.json({ indices: [], source: 'Unavailable', error: err.message });
-  }
+  } catch (err) { res.json({ indices: [], source: 'Unavailable', error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// USER MANAGEMENT (admin only)
-// ─────────────────────────────────────────────
 app.get('/api/admin/users', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { data, error } = await _supabase.from('saarthi_users').select('id, email, name, role, active, created_at');
@@ -764,20 +481,10 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res)
     const { email, name, role, password } = req.body;
     if (!email || !name || !role || !password) return res.status(400).json({ error: 'email, name, role, password required' });
     if (!['admin', 'manager', 'viewer'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
- 
-    // Create in Supabase Auth
-    const { data: authUser, error: authErr } = await _supabase.auth.admin.createUser({
-      email, password, email_confirm: true,
-    });
+    const { data: authUser, error: authErr } = await _supabase.auth.admin.createUser({ email, password, email_confirm: true });
     if (authErr) throw authErr;
- 
-    // Insert profile
-    const { error: profErr } = await _supabase.from('saarthi_users').insert({
-      id: authUser.user.id, email, name, role, active: true,
-      created_at: new Date().toISOString(),
-    });
+    const { error: profErr } = await _supabase.from('saarthi_users').insert({ id: authUser.user.id, email, name, role, active: true, created_at: new Date().toISOString() });
     if (profErr) throw profErr;
- 
     audit(req.user.id, 'USER_CREATED', { email, role });
     res.json({ ok: true, id: authUser.user.id });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -797,39 +504,16 @@ app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), async (req,
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// AUDIT LOG (admin only)
-// ─────────────────────────────────────────────
 app.get('/api/admin/audit', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const { data, error } = await _supabase.from('audit_log')
-      .select('*').order('created_at', { ascending: false }).limit(500);
+    const { data, error } = await _supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(500);
     if (error) throw error;
     res.json({ logs: data });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
-// ─────────────────────────────────────────────
-// PWA / SERVICE WORKER (public)
-// ─────────────────────────────────────────────
-app.get('/sw.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Service-Worker-Allowed', '/');
-  res.sendFile(path.join(__dirname, 'sw.js'));
-});
- 
-app.get('/manifest.json', (req, res) => {
-  res.json({
-    name: 'Saarthi PMS', short_name: 'Saarthi',
-    description: 'UpperCrust Wealth PMS Terminal',
-    start_url: '/', display: 'standalone',
-    background_color: '#0e0c07', theme_color: '#8a6814',
-    icons: [
-      { src: '/favicon.ico', sizes: '192x192', type: 'image/png' },
-      { src: '/favicon.ico', sizes: '512x512', type: 'image/png' },
-    ],
-  });
-});
+app.get('/sw.js', (req, res) => { res.setHeader('Content-Type', 'application/javascript'); res.setHeader('Service-Worker-Allowed', '/'); res.sendFile(path.join(__dirname, 'sw.js')); });
+app.get('/manifest.json', (req, res) => { res.json({ name: 'Saarthi PMS', short_name: 'Saarthi', description: 'UpperCrust Wealth PMS Terminal', start_url: '/', display: 'standalone', background_color: '#0e0c07', theme_color: '#8a6814', icons: [{ src: '/favicon.ico', sizes: '192x192', type: 'image/png' }, { src: '/favicon.ico', sizes: '512x512', type: 'image/png' }] }); });
  
 // ─────────────────────────────────────────────
 // CRON JOBS
@@ -837,8 +521,7 @@ app.get('/manifest.json', (req, res) => {
 cron.schedule('* * * * *', async () => {
   if (!VAPID_PUBLIC_KEY) return;
   try {
-    const { data: pending } = await _supabase.from('pending_notifications')
-      .select('*').eq('sent', false).order('created_at', { ascending: true }).limit(20);
+    const { data: pending } = await _supabase.from('pending_notifications').select('*').eq('sent', false).order('created_at', { ascending: true }).limit(20);
     if (!pending?.length) return;
     for (const n of pending) {
       const sent = await sendPushToAll(n.title, n.body || '', n.url, { tag: (n.cat || 'g') + '_' + n.id, priority: n.priority });
@@ -896,6 +579,9 @@ cron.schedule('0 9 * * 1', async () => {
   } catch (err) { console.error('[Cron weekly]', err.message); }
 }, { timezone: 'Asia/Kolkata' });
  
+// ⚡ SAARTHI PULSE — daily intelligence briefing at 6:15 AM IST
+cron.schedule('45 0 * * *', () => require('./crons/pulseCron').runPulseCron(), { timezone: 'Asia/Kolkata' });
+ 
 cron.schedule('0 2 * * *', async () => {
   try {
     const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -904,35 +590,16 @@ cron.schedule('0 2 * * *', async () => {
   } catch (err) { console.error('[Cron cleanup]', err.message); }
 }, { timezone: 'Asia/Kolkata' });
  
-// ─────────────────────────────────────────────
-// ERROR HANDLERS
-// ─────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
-app.use((err, req, res, next) => {
-  console.error('[ERROR]', err.message);
-  res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
-  });
-});
+app.use((err, req, res, next) => { console.error('[ERROR]', err.message); res.status(err.status || 500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message }); });
  
 const PORT = process.env.PORT || 4000;
  
-// ── Startup: disable RLS on app_settings via SQL ──
 (async () => {
   try {
-    // Verify service key works
-    const { error } = await _supabase.from('app_settings').upsert(
-      { key: '_startup_test', value: 'ok', updated_at: new Date().toISOString() },
-      { onConflict: 'key' }
-    );
-    if (error) {
-      console.error('CRITICAL: RLS still blocking writes:', error.message);
-      console.error('ACTION REQUIRED: Go to Supabase → SQL Editor → run:');
-      console.error('  ALTER TABLE app_settings DISABLE ROW LEVEL SECURITY;');
-      console.error('  ALTER TABLE fifo_lots DISABLE ROW LEVEL SECURITY;');
-    } else {
-      console.log('✓ Supabase writes working');
-    }
+    const { error } = await _supabase.from('app_settings').upsert({ key: '_startup_test', value: 'ok', updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    if (error) { console.error('CRITICAL: RLS still blocking writes:', error.message); }
+    else { console.log('✓ Supabase writes working'); }
   } catch(e) { console.error('Startup check failed:', e.message); }
 })();
  
