@@ -2433,8 +2433,8 @@ async function _liveStockAnalyser() {
   });
 
   h+='</tbody></table></div>';
-  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">↻ Refresh</button>
-        <button onclick="generatePulseReportPDF()" class="btn btn-ghost btn-xs" style="border-color:var(--gold);color:var(--gold3);font-weight:700">📄 Pulse Report</button></div>`;
+  h+=`<div style="text-align:right;margin-top:8px"><button onclick="_liveRenderActiveTab()" class="btn btn-ghost btn-xs">&#x21BB; Refresh</button>
+        <button onclick="generatePulseReportPDF()" class="btn btn-ghost btn-xs" style="border-color:var(--gold);color:var(--gold3);font-weight:700">&#128196; Pulse Report</button></div>`;
   h+='</div>';
   return h;
 }
@@ -12365,6 +12365,7 @@ async function _liveMorningBriefing() {
     const _tp = _DAILY_PICKS_CACHE[_todayKeyBanner];
     const _allPicks = [...(_tp.both||[]),...(_tp.tech||[]),...(_tp.funda||[])].filter((v,i,a)=>a.findIndex(x=>x.sym===v.sym)===i);
     const _picksCsv = 'Symbol,Category,In PMS\n'+_allPicks.map(s=>`${s.sym},${(_tp.both||[]).find(x=>x.sym===s.sym)?'Technical + Fundamental':(_tp.tech||[]).find(x=>x.sym===s.sym)?'Technical':'Fundamental'},${s.inPMS?'Yes':'No'}`).join('\n');
+    window._lastPicksCsv = _picksCsv;
     html += `<div style="background:var(--sur);border:1.5px solid var(--gbdr);border-radius:12px;padding:14px 16px;margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div>
@@ -12373,7 +12374,7 @@ async function _liveMorningBriefing() {
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button onclick="nav('picks')" style="padding:5px 12px;border-radius:8px;background:var(--glt);border:1px solid var(--gbdr);color:var(--gold3);font-size:10px;font-weight:700;cursor:pointer">📅 History</button>
-          <button onclick="(function(){const blob=new Blob(['${_picksCsv.replace(/'/g,"\'")}'],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='picks_${_todayKeyBanner}.csv';a.click()})()" style="padding:5px 12px;border-radius:8px;background:var(--gold2);border:1px solid var(--gbdr);color:#fff;font-size:10px;font-weight:700;cursor:pointer">↓ Download</button>
+          <button onclick="_downloadPicksCsv(window._lastPicksCsv,'picks_'+_todayKeyBanner+'.csv')" style="padding:5px 12px;border-radius:8px;background:var(--gold2);border:1px solid var(--gbdr);color:#fff;font-size:10px;font-weight:700;cursor:pointer">↓ Download</button>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
@@ -34780,6 +34781,14 @@ async function _buildPulseReport() {
   toast('Pulse Report ready \u2014 click Print / Save PDF','info');
 }
 
+
+function _downloadPicksCsv(csv, filename) {
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
 </script>
 </body>
 </html>
