@@ -34435,9 +34435,9 @@ function pulseRenderMarket(el) {
 
 // ═══════════════════════════════════════════════════════════════════════
 
-// ─── SAARTHI PULSE REPORT ────────────────────────────────────────
-// World-class PDF generator · Gold/ivory · Mobile + Desktop
-// ─────────────────────────────────────────────────────────────────
+// --- SAARTHI PULSE REPORT ----------------------------------------
+// World-class PDF generator - Gold/ivory - Mobile + Desktop
+// -----------------------------------------------------------------
 function generatePulseReportPDF() { _buildPulseReport(); }
 
 async function _buildPulseReport() {
@@ -34483,7 +34483,7 @@ async function _buildPulseReport() {
   const picksTech  = tp ? (tp.tech||[]).slice(0,5)  : [];
   const picksFunda = tp ? (tp.funda||[]).slice(0,5) : [];
 
-  // Worst/exit picks — inverse of best
+  // Worst/exit picks - inverse of best
   const worstB = allSyms.map(s=>{
     const t=_techScore(s); const f=_fundaScore(s);
     if(!t||!f) return null;
@@ -34503,8 +34503,8 @@ async function _buildPulseReport() {
   // Helpers
   const SC = s => s==null?'#999':s>=70?'#1a6e3a':s>=45?'#9a5208':'#b83228';
   const WC = r => r==null?'#999':r>=60?'#1a6e3a':r>=45?'#9a5208':'#b83228';
-  const FMT = (n,d) => n==null?'—':(n>=0?'+':'')+n.toFixed(d||2)+'%';
-  const CR = n => n==null?'—':'\u20b9'+(Math.abs(n)/10000000).toFixed(1)+'Cr';
+  const FMT = (n,d) => n==null?'&mdash;':(n>=0?'+':'')+n.toFixed(d||2)+'%';
+  const CR = n => n==null?'&mdash;':'\u20b9'+(Math.abs(n)/10000000).toFixed(1)+'Cr';
 
   const chip = (sym, inPMS, bg, fg, bdr) =>
     '<span style="display:inline-block;margin:2px;padding:3px 10px;border-radius:6px;font-size:10px;font-weight:600;background:'+bg+';color:'+fg+';border:1px solid '+bdr+'">'+
@@ -34545,7 +34545,7 @@ async function _buildPulseReport() {
     '</div></div>';
   };
 
-  // ─── Build HTML ───────────────────────────────────────────────
+  // --- Build HTML -----------------------------------------------
   let H = '';
 
   // COVER
@@ -34559,7 +34559,7 @@ async function _buildPulseReport() {
   H += '<div style="background:#faf6ee;border:1px solid rgba(124,97,24,.18);border-radius:10px;padding:14px"><div style="font-size:22px;font-weight:700;font-family:DM Mono,monospace">'+clients.length+'</div><div style="font-size:9px;color:#9e9480;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Active Clients</div></div>';
   H += '</div></div>';
 
-  // ─── SECTION 1: TODAY'S PICKS ───
+  // --- SECTION 1: TODAY'S PICKS ---
   H += sectionHead('01','Today\'s Picks','Locked '+todayKey+' &middot; Multi-factor screened');
   if(tp && (picksBoth.length||picksTech.length||picksFunda.length)) {
     if(picksBoth.length) {
@@ -34581,7 +34581,7 @@ async function _buildPulseReport() {
     H += '<div style="padding:14px;background:#faf6ee;border-radius:8px;font-size:11px;color:#9e9480;text-align:center">No picks generated today &mdash; open Morning Brief to generate</div>';
   }
 
-  // ─── EXIT / AVOID ───
+  // --- EXIT / AVOID ---
   H += '<div style="margin-top:18px">';
   H += sectionHead('EXIT','Exit / Avoid Signals','Weakest scores in your screener today','#fdf1ef','#b83228');
   if(worstB.length) {
@@ -34602,7 +34602,7 @@ async function _buildPulseReport() {
 
   H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
 
-  // ─── SECTION 2: PICK ACCOUNTABILITY ───
+  // --- SECTION 2: PICK ACCOUNTABILITY ---
   H += sectionHead('02','Pick Accountability','Win rate &middot; P&amp;L tracking &middot; 7d / 30d / 180d');
   H += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">';
   [
@@ -34648,7 +34648,7 @@ async function _buildPulseReport() {
 
   H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
 
-  // ─── SECTION 3: PORTFOLIO HEALTH ───
+  // --- SECTION 3: PORTFOLIO HEALTH ---
   H += sectionHead('03','Portfolio Health &amp; Hygiene','Fund scores &middot; Trend over time');
   ['UCWF','UCGF','UCPF'].forEach(f=>{
     const labels = {UCWF:'Wealth Fund',UCGF:'Growth Fund',UCPF:'Prosperity Fund'};
@@ -34663,7 +34663,7 @@ async function _buildPulseReport() {
 
   H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
 
-  // ─── SECTION 4: CLIENT BUCKETS + FLAGS ───
+  // --- SECTION 4: CLIENT BUCKETS + FLAGS ---
   H += sectionHead('04','Client Buckets &amp; Risk Flags','Movement vs 30d &middot; '+flags.length+' flags today');
   H += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
   [{b:'A',l:'Best',c:'#1a6e3a',bg:'#ecf7f0'},{b:'B',l:'On Track',c:'#9a5208',bg:'#fdf4e6'},{b:'C',l:'At Risk',c:'#b83228',bg:'#fdf1ef'},{b:'E',l:'Exception',c:'#9e9480',bg:'#f5f0e4'}].forEach(({b,l,c,bg})=>{
@@ -34698,7 +34698,7 @@ async function _buildPulseReport() {
 
   H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
 
-  // ─── SECTION 5: ASTROQUANT ───
+  // --- SECTION 5: ASTROQUANT ---
   H += sectionHead('05','AstroQuant Signal Tracker','Planetary cycles \u00d7 Indian market history');
   const astroEvents = [
     {d:'2026-12-06',e:'Rahu Sign Change \u2192 Capricorn',i:'Natural Gas',r:'+7.01%',w:'64% (14 obs)',s:'BUY',sc:'#1a6e3a',sb:'#ecf7f0'},
@@ -34728,7 +34728,7 @@ async function _buildPulseReport() {
 
   H += '<div style="height:1px;background:rgba(124,97,24,.2);margin:22px 0"></div>';
 
-  // ─── SECTION 6: MARKET CONTEXT ───
+  // --- SECTION 6: MARKET CONTEXT ---
   H += sectionHead('06','Market Context','Screener universe metrics vs 30 days ago');
   const mlbl = {universe_pe:'Universe Avg PE',universe_pb:'Avg P/B Ratio',universe_roe:'Avg ROE %',universe_roce:'Avg ROCE %',universe_debtEq:'Debt / Equity',universe_peg:'Avg PEG Ratio'};
   if(Object.keys(scr).length) {
@@ -34746,14 +34746,14 @@ async function _buildPulseReport() {
     H += '<div style="padding:14px;background:#faf6ee;border-radius:8px;font-size:11px;color:#9e9480">Upload latest Screener.in CSV in Tag Manager to see market context metrics</div>';
   }
 
-  // ─── FOOTER ───
+  // --- FOOTER ---
   H += '<div style="margin-top:32px;padding-top:16px;border-top:1px solid rgba(124,97,24,.2);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
   H += '<div><div style="font-size:11px;font-weight:600;color:#a37e20">Saarthi Pulse &middot; UpperCrust Wealth Management</div>';
   H += '<div style="font-size:9px;color:#9e9480;margin-top:2px">Generated '+timeStr+' IST &middot; '+dateStr+'</div></div>';
   H += '<div style="text-align:right;font-size:9px;color:#9e9480"><div style="font-weight:600">Confidential &mdash; Internal Use Only</div><div>uppercrustsaarthi.in</div></div></div>';
   H += '<div style="margin-top:10px;font-size:8.5px;color:#9e9480;line-height:1.6;padding:10px 14px;background:#faf6ee;border-radius:8px;border:1px solid rgba(0,0,0,.07)">This report is automatically generated by the Saarthi PMS Terminal. All data sourced from live portfolio uploads, Zerodha Kite API, and Screener.in. Planetary cycle data is for quantitative research purposes only. This document is confidential and intended solely for UpperCrust Wealth Management internal use. Not investment advice. Past performance is not indicative of future results.</div>';
 
-  // ─── CSS ───
+  // --- CSS ---
   const CSS = [
     '*{box-sizing:border-box;margin:0;padding:0}',
     'body{font-family:"DM Sans",system-ui,sans-serif;background:#fefcf7;color:#1e1b14;font-size:12px;line-height:1.5}',
