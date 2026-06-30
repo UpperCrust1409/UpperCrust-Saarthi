@@ -411,7 +411,7 @@ app.patch('/api/memory/:id', requireAuth, validate(schemas.memoryIdParamSchema, 
   } catch (err) { res.status(500).json({ error: safeError(err, 'memory_patch') }); }
 });
  
-app.post('/api/claude', requireAuth, claudeLimiter, async (req, res) => {
+app.post('/api/claude', requireAuth, claudeLimiter, validate(schemas.claudeChatSchema), async (req, res) => {
   try {
     if (!ANTHROPIC_KEY) return res.status(503).json({ error: { message: 'AI not configured on server' } });
     const { system, messages, model, max_tokens } = req.body;
@@ -427,7 +427,7 @@ app.post('/api/claude', requireAuth, claudeLimiter, async (req, res) => {
   } catch (err) { res.status(500).json({ error: { message: safeError(err, 'claude') } }); }
 });
  
-app.post('/api/claude/extract-memory', requireAuth, claudeLimiter, async (req, res) => {
+app.post('/api/claude/extract-memory', requireAuth, claudeLimiter, validate(schemas.claudeExtractMemorySchema), async (req, res) => {
   try {
     if (!ANTHROPIC_KEY) return res.json({ memories: [] });
     const { conversation, existing_memories } = req.body;
