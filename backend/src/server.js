@@ -139,7 +139,7 @@ app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: req.user }))
  
 const uploadRouter = require('./routes/upload');
 uploadRouter._supabase = null;
-app.use('/api/upload', requireAuth, (req, res, next) => { req.supabase = _supabase; next(); }, uploadRouter);
+app.use('/api/upload', requireAuth, requireRole('admin'), (req, res, next) => { req.supabase = _supabase; next(); }, uploadRouter);
  
 app.use('/api/clients',   requireAuth, injectSupabase, require('./routes/clients'));
 app.use('/api/stocks',    requireAuth, injectSupabase, require('./routes/stocks'));
@@ -156,7 +156,7 @@ try {
 } catch(e) { console.warn('[Compute] routes/compute.js not found — skipping.'); }
  
 const registerFIFORoutes = require('./routes/fifo');
-registerFIFORoutes(app, _supabase, requireAuth);
+registerFIFORoutes(app, _supabase, requireAuth, requireRole);
  
 // ─────────────────────────────────────────────
 // ✦ ASTROQUANT ROUTES
@@ -180,7 +180,7 @@ if (process.env.ASTRO_BACKFILL_DONE === 'true') {
   console.log('[AstroQuant] Crons SKIPPED — set ASTRO_BACKFILL_DONE=true after running backfill script');
 }
  
-app.post('/api/fifo/save-cache', requireAuth, async (req, res) => {
+app.post('/api/fifo/save-cache', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const { cache, status } = req.body;
     if (!cache || typeof cache !== 'object') return res.status(400).json({ error: 'cache required' });
@@ -195,8 +195,31 @@ app.post('/api/fifo/save-cache', requireAuth, async (req, res) => {
   } catch (err) { console.error('[FIFO save-cache]', err.message); res.status(500).json({ error: err.message }); }
 });
  
+// Settings key access tiers, per approved Authorization Matrix.
+// ADMIN_ONLY: read + write restricted to admin (credentials / core client financial truth data).
+// MANAGER_PLUS: read + write restricted to manager or admin (policy / compliance-adjacent config).
+// MANAGER_WRITE: read open to any logged-in user; write restricted to manager or admin (shared market-data caches).
+// Anything not listed (e.g. upload_meta) remains open read+write to any logged-in user, unchanged.
+const ADMIN_ONLY_SETTINGS_KEYS = new Set(['claude_api_key', 'nav_cashflows', 'trade_history']);
+const MANAGER_PLUS_SETTINGS_KEYS = new Set(['exceptional_clients', 'insider_map']);
+const MANAGER_WRITE_SETTINGS_KEY_PREFIXES = ['corp_actions', 'gsec_data', 'n500_data', 'screener_data', 'regime_cache', 'pe_snapshot_', 'family_groups'];
+ 
+function isManagerWriteKey(key) {
+  return MANAGER_WRITE_SETTINGS_KEY_PREFIXES.some(prefix => key === prefix || key.startsWith(prefix));
+}
+ 
+function settingsAccessDenied(key, role, forWrite) {
+  if (ADMIN_ONLY_SETTINGS_KEYS.has(key)) return role !== 'admin';
+  if (MANAGER_PLUS_SETTINGS_KEYS.has(key)) return role !== 'admin' && role !== 'manager';
+  if (forWrite && isManagerWriteKey(key)) return role !== 'admin' && role !== 'manager';
+  return false;
+}
+ 
 app.get('/api/settings/:key', requireAuth, async (req, res) => {
   try {
+    if (settingsAccessDenied(req.params.key, req.user.role, false)) {
+      return res.status(403).json({ error: 'Access denied for this settings key.' });
+    }
     const { data, error } = await _supabase.from('app_settings').select('value').eq('key', req.params.key).single();
     if (error && error.code !== 'PGRST116') throw error;
     res.json({ value: data?.value ?? null });
@@ -205,6 +228,9 @@ app.get('/api/settings/:key', requireAuth, async (req, res) => {
  
 app.post('/api/settings/:key', requireAuth, async (req, res) => {
   try {
+    if (settingsAccessDenied(req.params.key, req.user.role, true)) {
+      return res.status(403).json({ error: 'Access denied for this settings key.' });
+    }
     const { value } = req.body;
     if (value === undefined) return res.status(400).json({ error: 'Value required' });
     const sb = global._supabase || _supabase;
@@ -265,6 +291,12 @@ app.post('/api/memory', requireAuth, async (req, res) => {
  
 app.delete('/api/memory/:id', requireAuth, async (req, res) => {
   try {
+    const { data: existing, error: fetchErr } = await _supabase.from('saarthi_memory').select('created_by').eq('id', req.params.id).single();
+    if (fetchErr) throw fetchErr;
+    if (!existing) return res.status(404).json({ error: 'Memory not found' });
+    if (existing.created_by !== req.user.email && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only delete your own memories.' });
+    }
     const { error } = await _supabase.from('saarthi_memory').update({ active: false, updated_at: new Date().toISOString() }).eq('id', req.params.id);
     if (error) throw error;
     res.json({ ok: true });
@@ -273,6 +305,12 @@ app.delete('/api/memory/:id', requireAuth, async (req, res) => {
  
 app.patch('/api/memory/:id', requireAuth, async (req, res) => {
   try {
+    const { data: existing, error: fetchErr } = await _supabase.from('saarthi_memory').select('created_by').eq('id', req.params.id).single();
+    if (fetchErr) throw fetchErr;
+    if (!existing) return res.status(404).json({ error: 'Memory not found' });
+    if (existing.created_by !== req.user.email && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only edit your own memories.' });
+    }
     const { importance, memory, active } = req.body;
     const updates = { updated_at: new Date().toISOString() };
     if (importance !== undefined) updates.importance = importance;
@@ -354,7 +392,15 @@ app.post('/api/push/subscribe', requireAuth, async (req, res) => {
 app.post('/api/push/unsubscribe', requireAuth, async (req, res) => {
   try {
     const { endpoint } = req.body;
-    await _supabase.from('push_subscriptions').update({ active: false }).eq('endpoint', endpoint);
+    if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+    const { data: sub, error: fetchErr } = await _supabase.from('push_subscriptions').select('user_id').eq('endpoint', endpoint).single();
+    if (fetchErr && fetchErr.code !== 'PGRST116') throw fetchErr;
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+    if (sub.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only unsubscribe your own devices.' });
+    }
+    const { error } = await _supabase.from('push_subscriptions').update({ active: false }).eq('endpoint', endpoint);
+    if (error) throw error;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
