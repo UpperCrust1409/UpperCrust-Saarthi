@@ -6,6 +6,8 @@
  
 const router = require('express').Router();
 const { supabase } = require('../db/supabase');
+const { validate } = require('../validation/validate');
+const { pulseLogPickSchema, pulseResolveFlagSchema } = require('../validation/schemas');
  
 // requireAuth already runs upstream (mounted in server.js), so req.user is populated.
 function requireManagerPlus(req, res, next) {
@@ -154,7 +156,7 @@ router.get('/client-flags', async (req, res) => {
 });
  
 // ── POST /api/pulse/log-pick ──────────────────────────────────────
-router.post('/log-pick', requireManagerPlus, async (req, res) => {
+router.post('/log-pick', requireManagerPlus, validate(pulseLogPickSchema), async (req, res) => {
   try {
     const { symbol, company, fund, signalType, entryPrice, rationale, factorScores, sector, date } = req.body;
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
@@ -171,7 +173,7 @@ router.post('/log-pick', requireManagerPlus, async (req, res) => {
 });
  
 // ── POST /api/pulse/resolve-flag ──────────────────────────────────
-router.post('/resolve-flag', requireManagerPlus, async (req, res) => {
+router.post('/resolve-flag', requireManagerPlus, validate(pulseResolveFlagSchema), async (req, res) => {
   try {
     const { id } = req.body;
     await supabase.from('pulse_client_flags').update({ resolved: true }).eq('id', id);
