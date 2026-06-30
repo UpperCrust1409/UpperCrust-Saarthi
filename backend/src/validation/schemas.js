@@ -182,6 +182,120 @@ const claudeExtractMemorySchema = z.object({
   existing_memories: z.string().max(50_000, 'existing_memories exceeds maximum allowed length').optional(),
 });
  
+// ── POST /api/compute/xirr ──────────────────────────────────────────
+// Confirmed against frontend usage (index.html ~6302): cashflows are sent
+// as { date: ISOString, amount: number }. _xirr() reads cf.date and
+// cf.amount directly — both required per-entry. The existing top-level
+// length check (cashflows.length < 2) is preserved as-is; this schema
+// enforces the same minimum at the array level plus real per-item shape.
+const xirrSchema = z.object({
+  cashflows: z.array(z.object({
+    date: z.string().min(1, 'date is required'),
+    amount: z.number({ invalid_type_error: 'amount must be a number' }),
+  })).min(2, 'cashflows array must contain at least 2 entries'),
+});
+ 
+// ── POST /api/compute/health ────────────────────────────────────────
+// No frontend caller found for this single-client route (only the
+// no-body /health/batch variant is used) — validated defensively against
+// what computeHealthScore() actually reads, kept loose since the real
+// caller (if any) is unverified.
+const computeHealthClientSchema = z.object({
+  client: z.object({
+    holdings: z.array(z.any()).optional(),
+    total_invested: z.number().optional(),
+    total_current: z.number().optional(),
+    total_pnl: z.number().optional(),
+    cash: z.number().optional(),
+    investment_date: z.string().optional(),
+  }).passthrough(), // computeHealthScore tolerates/ignores extra fields already — don't strip them
+});
+ 
+// ── POST /api/compute/breaches/batch ────────────────────────────────
+// No frontend caller found. Existing check only requires `filters` to be
+// an array (empty array is valid today — zero filters simply yields zero
+// breaches) — that tolerance is preserved exactly, not tightened to
+// require a non-empty array.
+const breachFilterSchema = z.object({
+  active: z.boolean(),
+  type: z.enum(['stock_max', 'sector_max', 'cash_min', 'stock_min', 'sector_min']),
+  target: z.string().optional(),
+  threshold: z.number(),
+  name: z.string().optional(),
+});
+const breachesBatchSchema = z.object({
+  filters: z.array(breachFilterSchema),
+});
+ 
+// ── POST /api/astro/backtest ────────────────────────────────────────
+// Confirmed against frontend usage (index.html ~33455): date_from/date_to
+// come from <input> .value, which is '' when empty, not undefined — kept
+// as loosely-typed optional strings rather than a strict date format to
+// avoid rejecting that legitimate empty-string case.
+const astroBacktestSchema = z.object({
+  event_type: z.string().min(1, 'event_type and instrument required'),
+  instrument: z.string().min(1, 'event_type and instrument required'),
+  window_days: z.number().optional(),
+  date_from: z.string().optional(),
+  date_to: z.string().optional(),
+});
+ 
+// ── POST /api/astro/ai-query ────────────────────────────────────────
+// Mirrors the existing handler's exact business rule (question.trim().length < 5)
+// rather than a simpler approximation, so behavior is identical. A generous
+// upper bound is added — this triggers a downstream AI query, so an
+// unbounded question string is a cost/abuse vector the existing code never
+// considered.
+const astroAIQuerySchema = z.object({
+  question: z.string().min(1, 'Question too short')
+    .max(2000, 'question exceeds maximum allowed length')
+    .refine(q => q.trim().length >= 5, { message: 'Question too short' }),
+});
+ 
+// ── POST /api/astro/admin/run-cron ──────────────────────────────────
+// No frontend caller found — admin/ops-only. Existing inline check
+// (job === 'planets' / 'scores' / else 400) is preserved; this schema
+// gives the same rejection earlier with a clearer message.
+const astroRunCronSchema = z.object({
+  job: z.enum(['planets', 'scores'], { errorMap: () => ({ message: 'Unknown job' }) }),
+  date: z.string().optional(),
+});
+ 
+// ── POST /api/astro/admin/backfill ──────────────────────────────────
+// No frontend caller found — admin/ops-only, one-time historical backfill.
+// Kept loose (existing code already falls back to sane defaults via
+// `req.body.from || '2005-01-01'`) — not enforcing a strict date format
+// since the real caller's exact shape is unverified.
+const astroBackfillSchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+});
+ 
+// ── POST /api/pulse/log-pick ────────────────────────────────────────
+// Confirmed against frontend usage (index.html ~12750): entryPrice and
+// sector are both legitimately sent as null (from `_liveQ?.last_price||
+// _liveQ?.close||null` and `gm(pk.sym)?.sector||null`) — both fields are
+// explicitly nullable here, not just optional, to match real traffic.
+const pulseLogPickSchema = z.object({
+  symbol: z.string().min(1, 'symbol required'),
+  company: z.string().optional(),
+  fund: z.string().optional(),
+  signalType: z.string().optional(),
+  entryPrice: z.number().nullable().optional(),
+  rationale: z.string().optional(),
+  factorScores: z.record(z.string(), z.any()).optional(),
+  sector: z.string().nullable().optional(),
+  date: z.string().optional(),
+});
+ 
+// ── POST /api/pulse/resolve-flag ────────────────────────────────────
+// No frontend caller found. The existing handler has NO presence check on
+// `id` at all today (would silently call .eq('id', undefined) on a
+// missing id) — this closes a real, previously-unvalidated gap.
+const pulseResolveFlagSchema = z.object({
+  id: z.string().min(1, 'id is required'),
+});
+ 
 module.exports = {
   fifoSaveCacheSchema,
   settingsKeyParamSchema,
@@ -201,4 +315,13 @@ module.exports = {
   tagSymbolParamSchema,
   claudeChatSchema,
   claudeExtractMemorySchema,
+  xirrSchema,
+  computeHealthClientSchema,
+  breachesBatchSchema,
+  astroBacktestSchema,
+  astroAIQuerySchema,
+  astroRunCronSchema,
+  astroBackfillSchema,
+  pulseLogPickSchema,
+  pulseResolveFlagSchema,
 };
