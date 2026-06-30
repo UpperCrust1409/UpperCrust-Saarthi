@@ -1,6 +1,17 @@
+
 const express = require('express');
 const router = express.Router();
 const { supabase } = require('../db/supabase');
+const { validate } = require('../validation/validate');
+const { tagSchema, tagBulkSchema, tagSymbolParamSchema } = require('../validation/schemas');
+ 
+// requireAuth already runs upstream (mounted in server.js), so req.user is populated.
+// This just adds a role check for the one route in this file that needs it.
+function requireAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied. Admin role required.' });
+  next();
+}
  
 // GET /api/tags — all tags
 router.get('/', async (req, res) => {
@@ -18,7 +29,7 @@ router.get('/', async (req, res) => {
 });
  
 // POST /api/tags — upsert a single tag
-router.post('/', async (req, res) => {
+router.post('/', validate(tagSchema), async (req, res) => {
   try {
     const { symbol, sector, mcap, asset_type, max_alloc, hidden } = req.body;
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
@@ -46,7 +57,7 @@ router.post('/', async (req, res) => {
 });
  
 // DELETE /api/tags/:symbol — reset a tag
-router.delete('/:symbol', async (req, res) => {
+router.delete('/:symbol', validate(tagSymbolParamSchema, 'params'), async (req, res) => {
   try {
     const { error } = await supabase
       .from('tags')
@@ -60,8 +71,8 @@ router.delete('/:symbol', async (req, res) => {
   }
 });
  
-// POST /api/tags/bulk — save all tags at once
-router.post('/bulk', async (req, res) => {
+// POST /api/tags/bulk — save all tags at once (admin only — overwrites the entire sector/tag table)
+router.post('/bulk', requireAdmin, validate(tagBulkSchema), async (req, res) => {
   try {
     const { tags } = req.body;
     if (!Array.isArray(tags) || !tags.length) return res.status(400).json({ error: 'tags array required' });
