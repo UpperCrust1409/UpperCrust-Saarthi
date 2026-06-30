@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { supabase } = require('../db/supabase');
+const { validate } = require('../validation/validate');
+const { netCashSchema } = require('../validation/schemas');
+ 
+// requireAuth already runs upstream (mounted in server.js), so req.user is populated.
+function requireAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied. Admin role required.' });
+  next();
+}
  
 // GET /clients — all clients summary
 router.get('/', async (req, res) => {
@@ -33,9 +42,9 @@ router.get('/:id', async (req, res) => {
   }
 });
  
-// POST /clients/net-cash — store Net Investible Surplus per client
+// POST /clients/net-cash — store Net Investible Surplus per client (admin only)
 // Body: { netCashMap: { "CLIENT NAME(00012345)": 1481430, ... } }
-router.post('/net-cash', async (req, res) => {
+router.post('/net-cash', requireAdmin, validate(netCashSchema), async (req, res) => {
   try {
     const { netCashMap } = req.body;
     if (!netCashMap || typeof netCashMap !== 'object') {
