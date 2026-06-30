@@ -9,10 +9,9 @@ const { z } = require('./validate');
 // rejecting legitimate payloads without a corresponding business-logic
 // change, which is explicitly out of scope for this rollout).
 const fifoSaveCacheSchema = z.object({
-  cache: z.record(z.string().min(1), z.record(z.string(), z.any())).refine(
-    obj => Object.keys(obj).length > 0,
-    { message: 'cache must contain at least one client entry' }
-  ),
+  cache: z.record(z.string().min(1), z.record(z.string(), z.any()))
+    .refine(obj => Object.keys(obj).length > 0, { message: 'cache must contain at least one client entry' })
+    .refine(obj => Object.keys(obj).length <= 1000, { message: 'cache exceeds maximum allowed client entries (1000)' }),
   status: z.any().optional(),
 });
  
@@ -55,10 +54,9 @@ const adminUpdateUserSchema = z.object({
 // this schema only gates the top-level shape, which previously had no
 // check beyond `typeof netCashMap === 'object'`.
 const netCashSchema = z.object({
-  netCashMap: z.record(z.string().min(1), z.any()).refine(
-    obj => Object.keys(obj).length > 0,
-    { message: 'netCashMap must contain at least one client entry' }
-  ),
+  netCashMap: z.record(z.string().min(1), z.any())
+    .refine(obj => Object.keys(obj).length > 0, { message: 'netCashMap must contain at least one client entry' })
+    .refine(obj => Object.keys(obj).length <= 1000, { message: 'netCashMap exceeds maximum allowed client entries (1000)' }),
 });
  
 // ── POST /api/push/queue ───────────────────────────────────────────
@@ -83,7 +81,7 @@ const memoryCreateSchema = z.object({
     memory: z.string().min(1, 'memory text is required').max(5000),
     source: z.string().max(50).optional(),
     importance: z.number().min(1).max(10).optional(),
-  })).min(1, 'memories array must contain at least one entry'),
+  })).min(1, 'memories array must contain at least one entry').max(50, 'memories array exceeds maximum allowed entries (50)'),
 });
  
 // ── DELETE /api/memory/:id, PATCH /api/memory/:id ──────────────────
@@ -135,7 +133,7 @@ const tagSchema = z.object({
 });
  
 const tagBulkSchema = z.object({
-  tags: z.array(tagSchema).min(1, 'tags array must contain at least one entry'),
+  tags: z.array(tagSchema).min(1, 'tags array must contain at least one entry').max(2000, 'tags array exceeds maximum allowed entries (2000)'),
 });
  
 const tagSymbolParamSchema = z.object({ symbol: z.string().min(1).max(100) });
@@ -224,7 +222,7 @@ const breachFilterSchema = z.object({
   name: z.string().optional(),
 });
 const breachesBatchSchema = z.object({
-  filters: z.array(breachFilterSchema),
+  filters: z.array(breachFilterSchema).max(200, 'filters array exceeds maximum allowed entries (200)'),
 });
  
 // ── POST /api/astro/backtest ────────────────────────────────────────
@@ -283,7 +281,7 @@ const pulseLogPickSchema = z.object({
   signalType: z.string().optional(),
   entryPrice: z.number().nullable().optional(),
   rationale: z.string().optional(),
-  factorScores: z.record(z.string(), z.any()).optional(),
+  factorScores: z.record(z.string(), z.any()).refine(obj => Object.keys(obj).length <= 100, { message: 'factorScores exceeds maximum allowed entries (100)' }).optional(),
   sector: z.string().nullable().optional(),
   date: z.string().optional(),
 });
