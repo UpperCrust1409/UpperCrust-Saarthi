@@ -3,13 +3,22 @@
 // Mount: app.use('/api/pulse', requireAuth, injectSupabase, require('./routes/pulse'))
 // ═══════════════════════════════════════════════════════════════
 'use strict';
-
+ 
 const router = require('express').Router();
 const { supabase } = require('../db/supabase');
-
+ 
+// requireAuth already runs upstream (mounted in server.js), so req.user is populated.
+function requireManagerPlus(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+    return res.status(403).json({ error: 'Access denied. Manager or admin role required.' });
+  }
+  next();
+}
+ 
 const TODAY = () => new Date().toISOString().split('T')[0];
 const NDAYS_AGO = (n) => { const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().split('T')[0]; };
-
+ 
 // ── GET /api/pulse/report — full daily report data ───────────────
 router.get('/report', async (req, res) => {
   try {
@@ -18,7 +27,7 @@ router.get('/report', async (req, res) => {
     const d30  = NDAYS_AGO(30);
     const d180 = NDAYS_AGO(180);
     const d365 = NDAYS_AGO(365);
-
+ 
     const [
       reportMeta,
       todayPicks,
@@ -54,28 +63,28 @@ router.get('/report', async (req, res) => {
       supabase.from('pulse_score_snapshot').select('bucket, count:id').not('client_name', 'is', null).eq('snapshot_date', d7),
       supabase.from('pulse_score_snapshot').select('bucket, count:id').not('client_name', 'is', null).eq('snapshot_date', d30),
     ]);
-
+ 
     // Compute win rates
     const calcWinRate = (perfs) => {
       const closed = (perfs?.data || []).filter(p => p.outcome !== 'OPEN');
       const wins = closed.filter(p => p.return_pct > 0);
       return closed.length ? { rate: +(wins.length/closed.length*100).toFixed(1), n: closed.length, avgReturn: +(closed.reduce((s,p)=>s+p.return_pct,0)/closed.length*100).toFixed(2) } : null;
     };
-
+ 
     // Count buckets
     const countBuckets = (data) => {
       const m = { A: 0, B: 0, C: 0, E: 0 };
       (data?.data || []).forEach(r => { if(r.bucket) m[r.bucket] = (m[r.bucket]||0)+1; });
       return m;
     };
-
+ 
     // Screener percentile context
     const metricContext = {};
     (screenerToday?.data || []).forEach(s => {
       const hist = (screener30d?.data || []).find(h => h.metric === s.metric);
       metricContext[s.metric] = { today: s.value, d30: hist?.value || null, change: hist ? +(s.value - hist.value).toFixed(4) : null };
     });
-
+ 
     // AstroQuant accuracy summary
     const astroStats = {};
     (astroSignals?.data || []).filter(s => s.outcome !== 'OPEN').forEach(s => {
@@ -84,7 +93,7 @@ router.get('/report', async (req, res) => {
       astroStats[k].total++;
       if (s.outcome === 'HIT') astroStats[k].hits++;
     });
-
+ 
     res.json({
       date: today,
       meta: reportMeta?.data || {},
@@ -116,7 +125,7 @@ router.get('/report', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
+ 
 // ── GET /api/pulse/score-history?client=NAME&days=90 ─────────────
 router.get('/score-history', async (req, res) => {
   try {
@@ -131,7 +140,7 @@ router.get('/score-history', async (req, res) => {
     res.json({ history: data || [] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
+ 
 // ── GET /api/pulse/client-flags?days=30 ──────────────────────────
 router.get('/client-flags', async (req, res) => {
   try {
@@ -143,9 +152,9 @@ router.get('/client-flags', async (req, res) => {
     res.json({ flags: data || [] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
+ 
 // ── POST /api/pulse/log-pick ──────────────────────────────────────
-router.post('/log-pick', async (req, res) => {
+router.post('/log-pick', requireManagerPlus, async (req, res) => {
   try {
     const { symbol, company, fund, signalType, entryPrice, rationale, factorScores, sector, date } = req.body;
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
@@ -160,16 +169,16 @@ router.post('/log-pick', async (req, res) => {
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
+ 
 // ── POST /api/pulse/resolve-flag ──────────────────────────────────
-router.post('/resolve-flag', async (req, res) => {
+router.post('/resolve-flag', requireManagerPlus, async (req, res) => {
   try {
     const { id } = req.body;
     await supabase.from('pulse_client_flags').update({ resolved: true }).eq('id', id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
+ 
 // ── GET /api/pulse/picks-history?days=180 ────────────────────────
 router.get('/picks-history', async (req, res) => {
   try {
@@ -182,5 +191,5 @@ router.get('/picks-history', async (req, res) => {
     res.json({ picks: data || [] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
+ 
 module.exports = router;
