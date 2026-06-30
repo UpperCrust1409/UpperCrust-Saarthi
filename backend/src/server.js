@@ -1,6 +1,18 @@
 'use strict';
 require('dotenv').config();
  
+// Global safety nets — without these, an async error not wrapped in try/catch
+// (or thrown outside any request handler) can crash the process with no clear log.
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED REJECTION]', reason && reason.stack || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]', err && err.stack || err);
+  // Process state may be corrupted after a truly uncaught exception — exit so
+  // Railway restarts us cleanly rather than continuing in an unknown state.
+  process.exit(1);
+});
+ 
 const express    = require('express');
 const cors       = require('cors');
 const helmet     = require('helmet');
@@ -76,13 +88,61 @@ app.use((req, res, next) => { if (req.headers['content-type']?.startsWith('multi
  
 const _revokedTokens = new Set();
  
-function requireAuth(req, res, next) {
+// Caches sessions_revoked_at per user (DB-backed, so admin-revoked sessions
+// stay revoked across server restarts — unlike _revokedTokens above, which
+// only covers single-device logout and is intentionally in-memory only).
+const _revokedAtCache = new Map(); // userId -> { revokedAt, fetchedAt }
+const REVOKED_CACHE_TTL_MS = 30 * 1000;
+ 
+async function getSessionsRevokedAt(userId) {
+  const cached = _revokedAtCache.get(userId);
+  const now = Date.now();
+  if (cached && (now - cached.fetchedAt) < REVOKED_CACHE_TTL_MS) return cached.revokedAt;
+  const { data, error } = await _supabase.from('saarthi_users').select('sessions_revoked_at').eq('id', userId).single();
+  const revokedAt = (!error && data) ? data.sessions_revoked_at : null;
+  _revokedAtCache.set(userId, { revokedAt, fetchedAt: now });
+  return revokedAt;
+}
+ 
+// Persistent per-token (single-device) logout, backed by the revoked_tokens
+// table and keyed on the JWT's own `jti` claim — survives server restarts,
+// unlike _revokedTokens above which is still kept as a same-process,
+// zero-latency fast path (write-through on logout, see /api/auth/logout).
+const _jtiRevokedCache = new Map(); // jti -> { revoked, fetchedAt }
+const JTI_CACHE_TTL_MS = 60 * 1000;
+ 
+async function isTokenRevoked(jti) {
+  // Backward compatibility: tokens issued before this rollout have no jti.
+  // They simply can't be checked against this table — they still get the
+  // existing in-memory _revokedTokens check and the sessions_revoked_at
+  // check, just not per-token DB persistence, until they naturally expire.
+  if (!jti) return false;
+  const cached = _jtiRevokedCache.get(jti);
+  const now = Date.now();
+  if (cached && (now - cached.fetchedAt) < JTI_CACHE_TTL_MS) return cached.revoked;
+  const { data, error } = await _supabase.from('revoked_tokens').select('jti').eq('jti', jti).maybeSingle();
+  // Fail-open on a DB error (per approved failure-mode design): the JWT
+  // signature and expiry have already passed, so a transient DB issue here
+  // must not lock out the whole team over a single unreachable lookup.
+  const revoked = !error && !!data;
+  _jtiRevokedCache.set(jti, { revoked, fetchedAt: now });
+  return revoked;
+}
+ 
+async function requireAuth(req, res, next) {
   try {
     const header = req.headers.authorization || '';
     if (!header.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required' });
     const token = header.slice(7);
     if (_revokedTokens.has(token)) return res.status(401).json({ error: 'Session has been revoked. Please log in again.' });
     const payload = jwt.verify(token, JWT_SECRET);
+    if (await isTokenRevoked(payload.jti)) {
+      return res.status(401).json({ error: 'Session has been revoked. Please log in again.' });
+    }
+    const revokedAt = await getSessionsRevokedAt(payload.id);
+    if (revokedAt && payload.iat * 1000 < new Date(revokedAt).getTime()) {
+      return res.status(401).json({ error: 'Session has been revoked. Please log in again.' });
+    }
     req.user = payload;
     req._token = token;
     next();
@@ -102,9 +162,25 @@ function audit(userId, action, meta = {}) {
   _supabase.from('audit_log').insert({ user_id: userId, action, meta: JSON.stringify(meta), ip: meta._ip || null, created_at: new Date().toISOString() }).then(() => {}).catch(() => {});
 }
  
+// Logs the full error server-side (message + stack) and returns a generic,
+// safe message for the client response — never leaks internal error detail.
+function safeError(err, context) {
+  console.error(`[ERROR]${context ? ' [' + context + ']' : ''}`, err && err.stack || err);
+  return 'Something went wrong. Please try again.';
+}
+ 
 function injectSupabase(req, res, next) { req.supabase = _supabase; next(); }
  
-app.get('/health', (req, res) => res.json({ status: 'ok', ts: new Date() }));
+app.get('/health', async (req, res) => {
+  try {
+    const { error } = await _supabase.from('app_settings').select('key').limit(1);
+    if (error) throw error;
+    res.json({ status: 'ok', db: 'connected', ts: new Date() });
+  } catch (err) {
+    console.error('[Health] Database check failed:', err && err.stack || err);
+    res.status(503).json({ status: 'degraded', db: 'unreachable', ts: new Date() });
+  }
+});
  
 app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
@@ -115,15 +191,26 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     const user = authData.user;
     const { data: profile } = await _supabase.from('saarthi_users').select('role, name, active').eq('id', user.id).single();
     if (!profile || !profile.active) return res.status(403).json({ error: 'Account not active. Contact your administrator.' });
-    const token = jwt.sign({ id: user.id, email: user.email, role: profile.role, name: profile.name }, JWT_SECRET, { expiresIn: '8h' });
+    const token = jwt.sign({ id: user.id, email: user.email, role: profile.role, name: profile.name, jti: crypto.randomUUID() }, JWT_SECRET, { expiresIn: '8h' });
     audit(user.id, 'LOGIN', { _ip: req.ip, email: user.email });
     res.json({ token, user: { id: user.id, email: user.email, role: profile.role, name: profile.name }, expiresIn: 8 * 3600 });
   } catch (err) { console.error('[login]', err.message); res.status(500).json({ error: 'Login failed. Please try again.' }); }
 });
  
-app.post('/api/auth/logout', requireAuth, (req, res) => {
+app.post('/api/auth/logout', requireAuth, async (req, res) => {
   audit(req.user.id, 'LOGOUT', { _ip: req.ip });
+  // Same-process immediate fast path — unchanged from before.
   if (req._token) { _revokedTokens.add(req._token); setTimeout(() => _revokedTokens.delete(req._token), 8 * 3600 * 1000); }
+  // Persistent, per-device revocation — survives restarts. Only possible for
+  // tokens that have a jti (i.e. issued after this feature's rollout); older
+  // tokens still in circulation fall back to the in-memory check above until
+  // they naturally expire (max 8h), per the approved backward-compat design.
+  if (req.user.jti) {
+    const expiresAt = req.user.exp ? new Date(req.user.exp * 1000).toISOString() : new Date(Date.now() + 8 * 3600 * 1000).toISOString();
+    _jtiRevokedCache.set(req.user.jti, { revoked: true, fetchedAt: Date.now() }); // write-through, immediate within this process
+    const { error } = await _supabase.from('revoked_tokens').insert({ jti: req.user.jti, user_id: req.user.id, expires_at: expiresAt, reason: 'logout' });
+    if (error) console.error('[logout] Failed to persist revocation:', error.message || error);
+  }
   res.json({ ok: true });
 });
  
@@ -132,7 +219,7 @@ app.post('/api/admin/revoke/:userId', requireAuth, requireRole('admin'), async (
     await _supabase.from('saarthi_users').update({ sessions_revoked_at: new Date().toISOString() }).eq('id', req.params.userId);
     audit(req.user.id, 'SESSION_REVOKE', { target: req.params.userId });
     res.json({ ok: true, message: 'User sessions revoked.' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'admin_revoke') }); }
 });
  
 app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: req.user }));
@@ -192,7 +279,7 @@ app.post('/api/fifo/save-cache', requireAuth, requireRole('admin', 'manager'), a
     }
     if (status) await _supabase.from('app_settings').upsert({ key: 'fifo_status', value: JSON.stringify(status) }, { onConflict: 'key' });
     res.json({ ok: true, saved, total: clients.length });
-  } catch (err) { console.error('[FIFO save-cache]', err.message); res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'fifo_save_cache') }); }
 });
  
 // Settings key access tiers, per approved Authorization Matrix.
@@ -223,7 +310,7 @@ app.get('/api/settings/:key', requireAuth, async (req, res) => {
     const { data, error } = await _supabase.from('app_settings').select('value').eq('key', req.params.key).single();
     if (error && error.code !== 'PGRST116') throw error;
     res.json({ value: data?.value ?? null });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'settings_get') }); }
 });
  
 app.post('/api/settings/:key', requireAuth, async (req, res) => {
@@ -245,7 +332,7 @@ app.post('/api/settings/:key', requireAuth, async (req, res) => {
     }
     audit(req.user.id, 'SETTINGS_UPDATE', { key });
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'settings_post') }); }
 });
  
 app.get('/api/meta/:key', requireAuth, async (req, res) => {
@@ -275,7 +362,7 @@ app.get('/api/memory', requireAuth, async (req, res) => {
     const { data, error } = await _supabase.from('saarthi_memory').select('*').eq('active', true).order('importance', { ascending: false }).order('created_at', { ascending: false });
     if (error) throw error;
     res.json({ memories: data || [] });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'memory_get') }); }
 });
  
 app.post('/api/memory', requireAuth, async (req, res) => {
@@ -286,7 +373,7 @@ app.post('/api/memory', requireAuth, async (req, res) => {
     const { data, error } = await _supabase.from('saarthi_memory').insert(rows).select();
     if (error) throw error;
     res.json({ ok: true, saved: data.length });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'memory_post') }); }
 });
  
 app.delete('/api/memory/:id', requireAuth, async (req, res) => {
@@ -300,7 +387,7 @@ app.delete('/api/memory/:id', requireAuth, async (req, res) => {
     const { error } = await _supabase.from('saarthi_memory').update({ active: false, updated_at: new Date().toISOString() }).eq('id', req.params.id);
     if (error) throw error;
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'memory_delete') }); }
 });
  
 app.patch('/api/memory/:id', requireAuth, async (req, res) => {
@@ -319,7 +406,7 @@ app.patch('/api/memory/:id', requireAuth, async (req, res) => {
     const { error } = await _supabase.from('saarthi_memory').update(updates).eq('id', req.params.id);
     if (error) throw error;
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'memory_patch') }); }
 });
  
 app.post('/api/claude', requireAuth, claudeLimiter, async (req, res) => {
@@ -335,7 +422,7 @@ app.post('/api/claude', requireAuth, claudeLimiter, async (req, res) => {
     audit(req.user.id, 'CLAUDE_CALL', { model: model || 'claude-haiku-4-5' });
     const data = await response.json();
     res.status(response.ok ? 200 : response.status).json(data);
-  } catch (err) { res.status(500).json({ error: { message: err.message } }); }
+  } catch (err) { res.status(500).json({ error: { message: safeError(err, 'claude') } }); }
 });
  
 app.post('/api/claude/extract-memory', requireAuth, claudeLimiter, async (req, res) => {
@@ -353,7 +440,7 @@ app.post('/api/claude/extract-memory', requireAuth, claudeLimiter, async (req, r
     let memories = [];
     try { const m = text.match(/\[[\s\S]*\]/); if (m) memories = JSON.parse(m[0]); } catch (e) {}
     res.json({ memories });
-  } catch (err) { res.status(500).json({ memories: [], error: err.message }); }
+  } catch (err) { res.status(500).json({ memories: [], error: safeError(err, 'claude_extract_memory') }); }
 });
  
 const VAPID_PUBLIC_KEY  = process.env.VAPID_PUBLIC_KEY;
@@ -386,7 +473,7 @@ app.post('/api/push/subscribe', requireAuth, async (req, res) => {
     const { error } = await _supabase.from('push_subscriptions').upsert({ endpoint: subscription.endpoint, auth: subscription.keys?.auth, p256dh: subscription.keys?.p256dh, device: (device || 'unknown').slice(0, 200), user_id: req.user.id, active: true, updated_at: new Date().toISOString() }, { onConflict: 'endpoint' });
     if (error) throw error;
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'push_subscribe') }); }
 });
  
 app.post('/api/push/unsubscribe', requireAuth, async (req, res) => {
@@ -402,7 +489,7 @@ app.post('/api/push/unsubscribe', requireAuth, async (req, res) => {
     const { error } = await _supabase.from('push_subscriptions').update({ active: false }).eq('endpoint', endpoint);
     if (error) throw error;
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'push_unsubscribe') }); }
 });
  
 app.post('/api/push/queue', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
@@ -412,7 +499,7 @@ app.post('/api/push/queue', requireAuth, requireRole('admin', 'manager'), async 
     const { error } = await _supabase.from('pending_notifications').insert({ cat: cat || 'general', title: title.slice(0, 100), body: (body || '').slice(0, 300), url: url || FRONTEND_URL, priority: priority || 'normal', sent: false, created_at: new Date().toISOString() });
     if (error) throw error;
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'push_queue') }); }
 });
  
 let _kiteToken = null;
@@ -457,9 +544,9 @@ app.get('/api/kite/callback', async (req, res) => {
 });
  
 app.get('/api/kite/status', requireAuth, (req, res) => res.json({ connected: !!_kiteToken && !!_kiteTokenExpiry && new Date(_kiteTokenExpiry) > new Date(), expiry: _kiteTokenExpiry, apiKey: KITE_API_KEY }));
-app.get('/api/kite/quote',   requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: err.message }); } });
-app.get('/api/kite/ltp',     requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ltp?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: err.message }); } });
-app.get('/api/kite/ohlc',    requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ohlc?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: err.message }); } });
+app.get('/api/kite/quote',   requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_quote') }); } });
+app.get('/api/kite/ltp',     requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ltp?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_ltp') }); } });
+app.get('/api/kite/ohlc',    requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ohlc?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_ohlc') }); } });
  
 app.get('/api/kite/historical', requireAuth, async (req, res) => {
   try {
@@ -470,7 +557,7 @@ app.get('/api/kite/historical', requireAuth, async (req, res) => {
     const token = quote.data?.[symbol]?.instrument_token;
     if (!token) return res.status(404).json({ error: 'instrument not found' });
     res.json(await _kiteGet(`/instruments/historical/${token}/${interval || 'day'}?from=${from}&to=${to}&continuous=0&oi=0`));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'kite_historical') }); }
 });
  
 app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
@@ -491,7 +578,7 @@ app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
       return { symbol: s.symbol, qty: s.qty, avgCost: s.avgCost, ltp, marketValue: mv, cost, pnl: mv - cost, pnlPct: cost > 0 ? (mv - cost) / cost : 0, live: !!liveQ, exchange: nseQ ? 'NSE' : bseQ ? 'BSE' : '—' };
     });
     res.json({ connected: true, holdings: result, summary: { totalLive: result.reduce((s, r) => s + r.marketValue, 0), totalCost: result.reduce((s, r) => s + r.cost, 0), totalPnL: result.reduce((s, r) => s + r.pnl, 0) }, ts: new Date().toISOString() });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'kite_portfolio_live') }); }
 });
  
 app.get('/api/world-indices', requireAuth, async (req, res) => {
@@ -511,7 +598,7 @@ app.get('/api/world-indices', requireAuth, async (req, res) => {
       return { label: info.label, region: info.region, val: curr ? curr.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—', raw: curr, chg: curr ? (chgPct >= 0 ? '+' : '') + (chgPct * 100).toFixed(2) + '%' : '—', chgPct, live: curr > 0 };
     }).filter(Boolean);
     res.json({ indices, source: 'Delayed · Yahoo Finance', ts: new Date().toISOString() });
-  } catch (err) { res.json({ indices: [], source: 'Unavailable', error: err.message }); }
+  } catch (err) { res.json({ indices: [], source: 'Unavailable', error: safeError(err, 'world_indices') }); }
 });
  
 app.get('/api/admin/users', requireAuth, requireRole('admin'), async (req, res) => {
@@ -519,7 +606,7 @@ app.get('/api/admin/users', requireAuth, requireRole('admin'), async (req, res) 
     const { data, error } = await _supabase.from('saarthi_users').select('id, email, name, role, active, created_at');
     if (error) throw error;
     res.json({ users: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'admin_users_get') }); }
 });
  
 app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res) => {
@@ -533,7 +620,7 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res)
     if (profErr) throw profErr;
     audit(req.user.id, 'USER_CREATED', { email, role });
     res.json({ ok: true, id: authUser.user.id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'admin_users_post') }); }
 });
  
 app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
@@ -547,7 +634,7 @@ app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), async (req,
     if (error) throw error;
     audit(req.user.id, 'USER_UPDATED', { target: req.params.id, updates });
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'admin_users_patch') }); }
 });
  
 app.get('/api/admin/audit', requireAuth, requireRole('admin'), async (req, res) => {
@@ -555,7 +642,7 @@ app.get('/api/admin/audit', requireAuth, requireRole('admin'), async (req, res) 
     const { data, error } = await _supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(500);
     if (error) throw error;
     res.json({ logs: data });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeError(err, 'admin_audit_get') }); }
 });
  
 app.get('/sw.js', (req, res) => { res.setHeader('Content-Type', 'application/javascript'); res.setHeader('Service-Worker-Allowed', '/'); res.sendFile(path.join(__dirname, 'sw.js')); });
@@ -633,11 +720,12 @@ cron.schedule('0 2 * * *', async () => {
     const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
     await _supabase.from('pending_notifications').delete().eq('sent', true).lt('created_at', cutoff);
     await _supabase.from('audit_log').delete().lt('created_at', new Date(Date.now() - 90 * 86400000).toISOString());
+    await _supabase.from('revoked_tokens').delete().lt('expires_at', new Date().toISOString());
   } catch (err) { console.error('[Cron cleanup]', err.message); }
 }, { timezone: 'Asia/Kolkata' });
  
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
-app.use((err, req, res, next) => { console.error('[ERROR]', err.message); res.status(err.status || 500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message }); });
+app.use((err, req, res, next) => { console.error('[ERROR]', err && err.stack || err.message); res.status(err.status || 500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message }); });
  
 const PORT = process.env.PORT || 4000;
  
@@ -649,5 +737,22 @@ const PORT = process.env.PORT || 4000;
   } catch(e) { console.error('Startup check failed:', e.message); }
 })();
  
-app.listen(PORT, () => console.log(`Saarthi backend secured on :${PORT}`));
+const server = app.listen(PORT, () => console.log(`Saarthi backend secured on :${PORT}`));
+ 
+function gracefulShutdown(signal) {
+  console.log(`[Shutdown] ${signal} received — closing server gracefully...`);
+  server.close(() => {
+    console.log('[Shutdown] HTTP server closed. No new connections accepted, in-flight requests completed.');
+    process.exit(0);
+  });
+  // Safety net: force-exit if something keeps the server from closing in time
+  // (e.g. a hung connection), so Railway doesn't wait forever on a stuck deploy.
+  setTimeout(() => {
+    console.error('[Shutdown] Forced exit — server did not close within 15s.');
+    process.exit(1);
+  }, 15000).unref();
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+ 
 module.exports = app;
