@@ -147,10 +147,17 @@ router.get('/ai-query/suggestions', (req, res) => {
   res.json({ suggestions: SUGGESTED_QUESTIONS });
 });
  
+// requireAuth already runs for every route in this file (router.use(requireAuth)
+// above), so req.user is always populated by the time this runs. This ensures
+// authorization is enforced via middleware — before validate() — rather than as
+// an inline check inside the handler body.
+function requireAdmin(req, res, next) {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  next();
+}
+ 
 // ── POST /api/astro/admin/run-cron (admin only, for manual trigger) ──
-router.post('/admin/run-cron', requireAuth, validate(astroRunCronSchema), async (req, res) => {
-  const { user } = req;
-  if (user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+router.post('/admin/run-cron', requireAdmin, validate(astroRunCronSchema), async (req, res) => {
   const { job, date } = req.body;
   try {
     if (job === 'planets') await runDailyPlanetJob(date);
@@ -163,10 +170,7 @@ router.post('/admin/run-cron', requireAuth, validate(astroRunCronSchema), async 
 });
  
 // ── One-time historical backfill (admin only) ─────────────────────
-router.post('/admin/backfill', requireAuth, validate(astroBackfillSchema), async (req, res) => {
-  const { user } = req;
-  if (user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
- 
+router.post('/admin/backfill', requireAdmin, validate(astroBackfillSchema), async (req, res) => {
   // Fire async, return immediately
   res.json({ ok: true, message: 'Backfill started in background. Monitor Railway logs.' });
  
