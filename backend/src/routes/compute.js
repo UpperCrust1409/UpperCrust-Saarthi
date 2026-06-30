@@ -5,6 +5,8 @@
  */
 const express = require('express');
 const router = express.Router();
+const { validate } = require('../validation/validate');
+const { xirrSchema, computeHealthClientSchema, breachesBatchSchema } = require('../validation/schemas');
  
 // ── XIRR (Newton-Raphson) ──
 function _xirr(cashflows, guess) {
@@ -92,7 +94,7 @@ function evaluateBreaches(client, filters) {
 }
  
 // ── POST /xirr ──
-router.post('/xirr', (req, res) => {
+router.post('/xirr', validate(xirrSchema), (req, res) => {
   try {
     const { cashflows } = req.body;
     if (!Array.isArray(cashflows) || cashflows.length < 2)
@@ -103,7 +105,7 @@ router.post('/xirr', (req, res) => {
 });
  
 // ── POST /health ──
-router.post('/health', (req, res) => {
+router.post('/health', validate(computeHealthClientSchema), (req, res) => {
   try {
     const { client } = req.body;
     if (!client) return res.status(400).json({ error: 'client required' });
@@ -125,7 +127,7 @@ router.post('/health/batch', async (req, res) => {
 });
  
 // ── POST /breaches/batch ──
-router.post('/breaches/batch', async (req, res) => {
+router.post('/breaches/batch', validate(breachesBatchSchema), async (req, res) => {
   try {
     const { filters } = req.body;
     if (!Array.isArray(filters)) return res.status(400).json({ error: 'filters required' });
