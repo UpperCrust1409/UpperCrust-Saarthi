@@ -23,6 +23,8 @@ const cron       = require('node-cron');
 const jwt        = require('jsonwebtoken');
 const crypto     = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const { validate } = require('./validation/validate');
+const schemas = require('./validation/schemas');
  
 const JWT_SECRET       = process.env.JWT_SECRET;
 const SUPABASE_URL     = process.env.SUPABASE_URL;
@@ -267,7 +269,7 @@ if (process.env.ASTRO_BACKFILL_DONE === 'true') {
   console.log('[AstroQuant] Crons SKIPPED — set ASTRO_BACKFILL_DONE=true after running backfill script');
 }
  
-app.post('/api/fifo/save-cache', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+app.post('/api/fifo/save-cache', requireAuth, requireRole('admin', 'manager'), validate(schemas.fifoSaveCacheSchema), async (req, res) => {
   try {
     const { cache, status } = req.body;
     if (!cache || typeof cache !== 'object') return res.status(400).json({ error: 'cache required' });
@@ -313,7 +315,7 @@ app.get('/api/settings/:key', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: safeError(err, 'settings_get') }); }
 });
  
-app.post('/api/settings/:key', requireAuth, async (req, res) => {
+app.post('/api/settings/:key', requireAuth, validate(schemas.settingsKeyParamSchema, 'params'), validate(schemas.settingsValueBodySchema), async (req, res) => {
   try {
     if (settingsAccessDenied(req.params.key, req.user.role, true)) {
       return res.status(403).json({ error: 'Access denied for this settings key.' });
@@ -365,7 +367,7 @@ app.get('/api/memory', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: safeError(err, 'memory_get') }); }
 });
  
-app.post('/api/memory', requireAuth, async (req, res) => {
+app.post('/api/memory', requireAuth, validate(schemas.memoryCreateSchema), async (req, res) => {
   try {
     const { memories } = req.body;
     if (!memories?.length) return res.status(400).json({ error: 'Memories array required' });
@@ -376,7 +378,7 @@ app.post('/api/memory', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: safeError(err, 'memory_post') }); }
 });
  
-app.delete('/api/memory/:id', requireAuth, async (req, res) => {
+app.delete('/api/memory/:id', requireAuth, validate(schemas.memoryIdParamSchema, 'params'), async (req, res) => {
   try {
     const { data: existing, error: fetchErr } = await _supabase.from('saarthi_memory').select('created_by').eq('id', req.params.id).single();
     if (fetchErr) throw fetchErr;
@@ -390,7 +392,7 @@ app.delete('/api/memory/:id', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: safeError(err, 'memory_delete') }); }
 });
  
-app.patch('/api/memory/:id', requireAuth, async (req, res) => {
+app.patch('/api/memory/:id', requireAuth, validate(schemas.memoryIdParamSchema, 'params'), validate(schemas.memoryUpdateSchema), async (req, res) => {
   try {
     const { data: existing, error: fetchErr } = await _supabase.from('saarthi_memory').select('created_by').eq('id', req.params.id).single();
     if (fetchErr) throw fetchErr;
@@ -466,7 +468,7 @@ async function sendPushToAll(title, body, url, opts = {}) {
  
 app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY || null }));
  
-app.post('/api/push/subscribe', requireAuth, async (req, res) => {
+app.post('/api/push/subscribe', requireAuth, validate(schemas.pushSubscribeSchema), async (req, res) => {
   try {
     const { subscription, device } = req.body;
     if (!subscription?.endpoint) return res.status(400).json({ error: 'Invalid subscription' });
@@ -476,7 +478,7 @@ app.post('/api/push/subscribe', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: safeError(err, 'push_subscribe') }); }
 });
  
-app.post('/api/push/unsubscribe', requireAuth, async (req, res) => {
+app.post('/api/push/unsubscribe', requireAuth, validate(schemas.pushUnsubscribeSchema), async (req, res) => {
   try {
     const { endpoint } = req.body;
     if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
@@ -492,7 +494,7 @@ app.post('/api/push/unsubscribe', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: safeError(err, 'push_unsubscribe') }); }
 });
  
-app.post('/api/push/queue', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+app.post('/api/push/queue', requireAuth, requireRole('admin', 'manager'), validate(schemas.pushQueueSchema), async (req, res) => {
   try {
     const { cat, title, body, url, priority } = req.body;
     if (!title) return res.status(400).json({ error: 'title required' });
@@ -609,7 +611,7 @@ app.get('/api/admin/users', requireAuth, requireRole('admin'), async (req, res) 
   } catch (err) { res.status(500).json({ error: safeError(err, 'admin_users_get') }); }
 });
  
-app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res) => {
+app.post('/api/admin/users', requireAuth, requireRole('admin'), validate(schemas.adminCreateUserSchema), async (req, res) => {
   try {
     const { email, name, role, password } = req.body;
     if (!email || !name || !role || !password) return res.status(400).json({ error: 'email, name, role, password required' });
@@ -623,7 +625,7 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res)
   } catch (err) { res.status(500).json({ error: safeError(err, 'admin_users_post') }); }
 });
  
-app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), validate(schemas.adminUserIdParamSchema, 'params'), validate(schemas.adminUpdateUserSchema), async (req, res) => {
   try {
     const { role, active, name } = req.body;
     const updates = { updated_at: new Date().toISOString() };
