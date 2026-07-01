@@ -1,3 +1,4 @@
+
 'use strict';
 require('dotenv').config();
  
@@ -257,6 +258,7 @@ console.log('[AstroQuant] Routes registered');
 // ⚡ SAARTHI PULSE ROUTES
 // ─────────────────────────────────────────────
 app.use('/api/pulse', requireAuth, injectSupabase, require('./routes/pulse'));
+app.use('/api/regime', requireAuth, require('./routes/regime'));
 console.log('[Pulse] Routes registered');
  
 // AstroQuant crons
@@ -290,8 +292,8 @@ app.post('/api/fifo/save-cache', requireAuth, requireRole('admin', 'manager'), v
 // MANAGER_WRITE: read open to any logged-in user; write restricted to manager or admin (shared market-data caches).
 // Anything not listed (e.g. upload_meta) remains open read+write to any logged-in user, unchanged.
 const ADMIN_ONLY_SETTINGS_KEYS = new Set(['claude_api_key', 'nav_cashflows', 'trade_history']);
-const MANAGER_PLUS_SETTINGS_KEYS = new Set(['exceptional_clients', 'insider_map']);
-const MANAGER_WRITE_SETTINGS_KEY_PREFIXES = ['corp_actions', 'gsec_data', 'n500_data', 'screener_data', 'regime_cache', 'pe_snapshot_', 'family_groups'];
+const MANAGER_PLUS_SETTINGS_KEYS = new Set(['insider_map']); // exceptional_clients write stays manager+, but read is now open
+const MANAGER_WRITE_SETTINGS_KEY_PREFIXES = ['corp_actions', 'gsec_data', 'n500_data', 'screener_data', 'regime_cache', 'pe_snapshot_', 'family_groups', 'custom_filters', 'call_log', 'custom_stocks', 'trade_groups', 'price_alerts', 'catd', 'client_invest', 'fl_cfg', 'fii_data', 'stock_limits'];
  
 function isManagerWriteKey(key) {
   return MANAGER_WRITE_SETTINGS_KEY_PREFIXES.some(prefix => key === prefix || key.startsWith(prefix));
@@ -299,6 +301,7 @@ function isManagerWriteKey(key) {
  
 function settingsAccessDenied(key, role, forWrite) {
   if (ADMIN_ONLY_SETTINGS_KEYS.has(key)) return role !== 'admin';
+  if (key === 'exceptional_clients') return forWrite ? (role !== 'admin' && role !== 'manager') : false; // read=all, write=manager+
   if (MANAGER_PLUS_SETTINGS_KEYS.has(key)) return role !== 'admin' && role !== 'manager';
   if (forWrite && isManagerWriteKey(key)) return role !== 'admin' && role !== 'manager';
   return false;
