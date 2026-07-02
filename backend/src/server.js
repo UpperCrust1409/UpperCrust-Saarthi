@@ -258,6 +258,7 @@ console.log('[AstroQuant] Routes registered');
 // ─────────────────────────────────────────────
 app.use('/api/pulse', requireAuth, injectSupabase, require('./routes/pulse'));
 app.use('/api/regime', requireAuth, require('./routes/regime'));
+app.use('/api/tech-indicators', requireAuth, (req,res,next)=>{req.supabase=_supabase;req._kiteGet=_kiteGet;next();}, require('./routes/techIndicators'));
 console.log('[Pulse] Routes registered');
  
 // AstroQuant crons
