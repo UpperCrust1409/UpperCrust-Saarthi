@@ -14,9 +14,54 @@ const { runDailyPlanetJob } = require('../crons/dailyPlanetCron');
 const { runSectorScoreJob } = require('../crons/sectorScoreCron');
 const { validate } = require('../validation/validate');
 const { astroBacktestSchema, astroAIQuerySchema, astroRunCronSchema, astroBackfillSchema } = require('../validation/schemas');
+const { getIndiaDasha, getCurrentDashaLords, kpSubLord } = require('../services/dashaService');
+const { computePanchangRange } = require('../services/panchangService');
  
 // All routes require auth
 router.use(requireAuth);
+ 
+// ── GET /api/astro/india-dasha ─────────────────────────────────────
+// India's national chart (15 Aug 1947, 00:00 IST, Delhi) Vimshottari
+// Mahadasha/Antardasha timeline — deterministic Parashari arithmetic,
+// no interpretation. Cross-checked against published reference dates
+// (Venus 1989-2009, Sun 2009-15, Moon 2015-25, Mars 2025-32 — all match).
+router.get('/india-dasha', async (req, res) => {
+  try {
+    const dasha = getIndiaDasha();
+    const current = getCurrentDashaLords(dasha);
+    res.json({ ...dasha, current });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+ 
+// ── GET /api/astro/panchang?days=30 ────────────────────────────────
+// Tithi, Karana (Bhadra/Vishti), Panchak calendar — the classical
+// Teji-Mandi (Argha Martand) financial timing filters. Pure arithmetic
+// from Sun-Moon angular difference.
+router.get('/panchang', async (req, res) => {
+  try {
+    const days = Math.min(60, parseInt(req.query.days) || 30);
+    const today = new Date().toISOString().slice(0,10);
+    res.json({ days: computePanchangRange(today, days) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+ 
+// ── GET /api/astro/kp-sublords ──────────────────────────────────────
+// KP sub-lord for every planet today — reuses today's already-computed
+// sidereal positions (astro_planet_positions), just adds the sub-lord
+// layer. Scoped to planetary positions, not house cusps (see comment
+// in dashaService.js for why).
+router.get('/kp-sublords', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data: planets, error } = await supabase.from('astro_planet_positions').select('*').eq('date', today).order('planet');
+    if (error) throw error;
+    const result = (planets||[]).map(p => ({
+      planet: p.planet, sign: p.sign, nakshatra: p.nakshatra, longitude: p.longitude,
+      ...kpSubLord(p.longitude),
+    }));
+    res.json({ date: today, planets: result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
  
 // ── GET /api/astro/dashboard ──────────────────────────────────────
 router.get('/dashboard', async (req, res) => {
