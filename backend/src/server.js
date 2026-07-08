@@ -533,6 +533,36 @@ async function _kiteGet(endpoint) {
   return resp.json();
 }
  
+// ── Instrument token cache — instrument_token per symbol is static and
+// almost never changes. Previously every /api/kite/historical call did
+// an extra /quote/ltp round-trip just to resolve this, doubling actual
+// Kite API usage and adding a second failure point (401s whenever that
+// lookup call itself hiccuped). Now resolved once per day from Kite's
+// own instruments dump. ──
+let _instrumentTokenMap = {};
+let _instrumentMapDate = null;
+async function _ensureInstrumentMap() {
+  const today = new Date().toISOString().split('T')[0];
+  if (_instrumentMapDate === today && Object.keys(_instrumentTokenMap).length) return;
+  if (!_kiteToken) return;
+  try {
+    const resp = await fetch(`${KITE_BASE}/instruments/NSE`, { headers: { 'Authorization': `token ${KITE_API_KEY}:${_kiteToken}`, 'X-Kite-Version': '3' } });
+    const csv = await resp.text();
+    const lines = csv.split('\n');
+    const header = lines[0].split(',');
+    const tokenIdx = header.indexOf('instrument_token');
+    const symIdx = header.indexOf('tradingsymbol');
+    const map = {};
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',');
+      if (cols.length <= Math.max(tokenIdx, symIdx)) continue;
+      const sym = cols[symIdx];
+      if (sym) map['NSE:' + sym] = cols[tokenIdx];
+    }
+    if (Object.keys(map).length) { _instrumentTokenMap = map; _instrumentMapDate = today; console.log('[Kite] Instrument map loaded:', Object.keys(map).length, 'NSE symbols'); }
+  } catch (e) { console.warn('[Kite] Instrument map fetch failed:', e.message); }
+}
+ 
 app.get('/api/kite/login-url', requireAuth, (req, res) => res.json({ url: `https://kite.zerodha.com/connect/login?v=3&api_key=${KITE_API_KEY}` }));
  
 app.get('/api/kite/callback', async (req, res) => {
@@ -550,17 +580,23 @@ app.get('/api/kite/callback', async (req, res) => {
 });
  
 app.get('/api/kite/status', requireAuth, (req, res) => res.json({ connected: !!_kiteToken && !!_kiteTokenExpiry && new Date(_kiteTokenExpiry) > new Date(), expiry: _kiteTokenExpiry, apiKey: KITE_API_KEY }));
-app.get('/api/kite/quote',   requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_quote') }); } });
-app.get('/api/kite/ltp',     requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ltp?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_ltp') }); } });
-app.get('/api/kite/ohlc',    requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ohlc?i=${symbols.split(',').join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_ohlc') }); } });
+app.get('/api/kite/quote',   requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote?i=${symbols.split(',').map(encodeURIComponent).join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_quote') }); } });
+app.get('/api/kite/ltp',     requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ltp?i=${symbols.split(',').map(encodeURIComponent).join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_ltp') }); } });
+app.get('/api/kite/ohlc',    requireAuth, async (req, res) => { try { const { symbols } = req.query; if (!symbols) return res.status(400).json({ error: 'symbols required' }); res.json(await _kiteGet(`/quote/ohlc?i=${symbols.split(',').map(encodeURIComponent).join('&i=')}`)); } catch (err) { res.status(500).json({ error: safeError(err, 'kite_ohlc') }); } });
  
 app.get('/api/kite/historical', requireAuth, async (req, res) => {
   try {
     const { symbol, interval, from, to } = req.query;
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
-    const quote = await _kiteGet(`/quote/ltp?i=${symbol}`);
-    if (quote.error) return res.status(401).json(quote);
-    const token = quote.data?.[symbol]?.instrument_token;
+    await _ensureInstrumentMap();
+    let token = _instrumentTokenMap[symbol];
+    if (!token) {
+      // Fallback for the rare miss (map not loaded yet, or symbol renamed) —
+      // same lookup as before, just no longer the default path.
+      const quote = await _kiteGet(`/quote/ltp?i=${encodeURIComponent(symbol)}`);
+      if (quote.error) return res.status(401).json(quote);
+      token = quote.data?.[symbol]?.instrument_token;
+    }
     if (!token) return res.status(404).json({ error: 'instrument not found' });
     res.json(await _kiteGet(`/instruments/historical/${token}/${interval || 'day'}?from=${from}&to=${to}&continuous=0&oi=0`));
   } catch (err) { res.status(500).json({ error: safeError(err, 'kite_historical') }); }
@@ -576,7 +612,7 @@ app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
     const allData = {};
     for (let i = 0; i < allSyms.length; i += 500) {
       const batch = allSyms.slice(i, i + 500);
-      try { const data = await _kiteGet(`/quote/ltp?i=${batch.join('&i=')}`); if (data.data) Object.assign(allData, data.data); } catch (e) {}
+      try { const data = await _kiteGet(`/quote/ltp?i=${batch.map(encodeURIComponent).join('&i=')}`); if (data.data) Object.assign(allData, data.data); } catch (e) {}
     }
     const result = symbols.map(s => {
       const nseQ = allData[`NSE:${s.symbol}`]; const bseQ = allData[`BSE:${s.symbol}`]; const liveQ = nseQ || bseQ;
@@ -632,6 +668,9 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), validate(schemas
 app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), validate(schemas.adminUserIdParamSchema, 'params'), validate(schemas.adminUpdateUserSchema), async (req, res) => {
   try {
     const { role, active, name } = req.body;
+    if (req.params.id === req.user.id && ((role !== undefined && role !== 'admin') || active === false)) {
+      return res.status(400).json({ error: 'You cannot remove your own admin role or deactivate your own account.' });
+    }
     const updates = { updated_at: new Date().toISOString() };
     if (role   !== undefined) updates.role   = role;
     if (active !== undefined) updates.active = active;
@@ -720,6 +759,7 @@ cron.schedule('0 9 * * 1', async () => {
  
 // ⚡ SAARTHI PULSE — daily intelligence briefing at 6:15 AM IST
 cron.schedule('45 0 * * *', () => require('./crons/pulseCron').runPulseCron(), { timezone: 'Asia/Kolkata' });
+ 
  
 cron.schedule('0 2 * * *', async () => {
   try {
