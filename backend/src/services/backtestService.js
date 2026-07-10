@@ -15,6 +15,35 @@
  
 const { supabase } = require('../db/supabase');
 const { getOHLC } = require('./kiteHistoricalService');
+const { computePanchangRange } = require('./panchangService');
+const { kpSubLord } = require('./dashaService');
+ 
+function norm360(x) { return ((x % 360) + 360) % 360; }
+function julianDay(year, month, day, hour = 12) {
+  if (month <= 2) { year--; month += 12; }
+  const A = Math.floor(year / 100);
+  const B = 2 - A + Math.floor(A / 4);
+  return Math.floor(365.25 * (year + 4716)) + Math.floor(30.6001 * (month + 1)) + day + B - 1524.5 + hour / 24;
+}
+function T(jd) { return (jd - 2451545.0) / 36525; }
+function lahiriAyanamsha(jd) { return 23.85 + T(jd) * (50.3/3600) * 100; }
+function moonLongitudeTropical(jd) {
+  const t = T(jd);
+  const L  = norm360(218.3165 + 481267.8813 * t);
+  const M  = norm360(357.5291 + 35999.0503  * t) * Math.PI/180;
+  const Mm = norm360(134.9634 + 477198.8676 * t) * Math.PI/180;
+  const D  = norm360(297.8502 + 445267.1115 * t) * Math.PI/180;
+  const F  = norm360(93.2721  + 483202.0175 * t) * Math.PI/180;
+  return norm360(L + 6.2886*Math.sin(Mm) + 1.2740*Math.sin(2*D-Mm) + 0.6583*Math.sin(2*D)
+    + 0.2136*Math.sin(2*Mm) - 0.1851*Math.sin(M) - 0.1143*Math.sin(2*F)
+    + 0.0588*Math.sin(2*D-2*Mm) + 0.0572*Math.sin(2*D-M-Mm) + 0.0533*Math.sin(2*D+Mm));
+}
+function moonSubLordForDate(dateStr) {
+  const [y,m,d] = dateStr.split('-').map(Number);
+  const jd = julianDay(y, m, d, 12);
+  const sidereal = norm360(moonLongitudeTropical(jd) - lahiriAyanamsha(jd));
+  return kpSubLord(sidereal).subLord;
+}
  
 const CACHE_TTL_DAYS = 7;
 const DECAY_WINDOWS = [7, 15, 30, 60, 90];
@@ -156,6 +185,36 @@ async function runBacktest({ event_type, instrument, window_days = 30, date_from
  
 // ── Fetch events for a given event_type key (unchanged mapping logic) ──
 async function fetchEvents(event_type, date_from, date_to) {
+  // Panchang-based events (Bhadra, Panchak) are pure date arithmetic —
+  // computed on the fly across the requested range, no dependency on
+  // the astro_planetary_events backfill.
+  if (event_type.startsWith('MOON_SUBLORD_')) {
+    const targetLord = event_type.replace('MOON_SUBLORD_', '');
+    const from = date_from || '2015-01-01';
+    const to = date_to || new Date().toISOString().slice(0,10);
+    const days = Math.min(Math.round((new Date(to) - new Date(from)) / 86400000) + 1, 4000);
+    const out = [];
+    const start = new Date(from);
+    for (let i = 0; i < days; i++) {
+      const dt = new Date(start.getTime() + i*86400000);
+      const ds = dt.toISOString().slice(0,10);
+      if (moonSubLordForDate(ds) === targetLord) out.push({ event_date: ds, description: 'Moon sub-lord: '+targetLord });
+    }
+    return out;
+  }
+ 
+  if (event_type === 'BHADRA_DAY' || event_type === 'PANCHAK_DAY') {
+    const from = date_from || '2015-01-01';
+    const to = date_to || new Date().toISOString().slice(0,10);
+    const days = Math.round((new Date(to) - new Date(from)) / 86400000);
+    const panchang = computePanchangRange(from, Math.min(days+1, 4000)); // cap to avoid runaway compute
+    const filterFn = event_type === 'BHADRA_DAY' ? p => p.isBhadra : p => p.isPanchak;
+    return panchang.filter(filterFn).map(p => ({
+      event_date: p.date,
+      description: event_type === 'BHADRA_DAY' ? 'Bhadra (Vishti Karana)' : 'Panchak',
+    }));
+  }
+ 
   let q = supabase.from('astro_planetary_events').select('event_date, planet, planet2, description').order('event_date', { ascending: true });
  
   if (event_type === 'MERCURY_RETROGRADE') q = q.eq('event_type', 'RETROGRADE_START').eq('planet', 'Mercury');
