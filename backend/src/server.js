@@ -563,6 +563,45 @@ async function _ensureInstrumentMap() {
   } catch (e) { console.warn('[Kite] Instrument map fetch failed:', e.message); }
 }
  
+// ── MCX commodity futures map — nearest-expiry contract per commodity,
+// since MCX futures roll monthly and the tradingsymbol changes every
+// month (e.g. GOLD25DECFUT). Refreshed daily. Requires Commodity
+// Derivatives segment active on the Kite account. ──
+let _mcxMap = {}; // { GOLD: {token, tradingsymbol, expiry}, ... }
+let _mcxMapDate = null;
+const MCX_COMMODITIES = ['GOLD','SILVER','CRUDEOIL','NATURALGAS','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
+async function _ensureMCXMap() {
+  const today = new Date().toISOString().split('T')[0];
+  if (_mcxMapDate === today && Object.keys(_mcxMap).length) return;
+  if (!_kiteToken) return;
+  try {
+    const resp = await fetch(`${KITE_BASE}/instruments/MCX`, { headers: { 'Authorization': `token ${KITE_API_KEY}:${_kiteToken}`, 'X-Kite-Version': '3' } });
+    const csv = await resp.text();
+    const lines = csv.split('\n');
+    const header = lines[0].split(',');
+    const tokenIdx = header.indexOf('instrument_token');
+    const symIdx = header.indexOf('tradingsymbol');
+    const nameIdx = header.indexOf('name');
+    const expiryIdx = header.indexOf('expiry');
+    const typeIdx = header.indexOf('instrument_type');
+    const nearest = {}; // name -> {token, tradingsymbol, expiry}
+    for (let i = 1; i < lines.length; i++) {
+      // MCX 'name' field is unquoted (no commas), safe to split naively
+      const cols = lines[i].split(',');
+      if (cols.length <= Math.max(tokenIdx, symIdx, nameIdx, expiryIdx, typeIdx)) continue;
+      if (cols[typeIdx] !== 'FUT') continue;
+      const name = cols[nameIdx];
+      if (!MCX_COMMODITIES.includes(name)) continue;
+      const expiry = cols[expiryIdx];
+      if (!expiry || expiry < today) continue; // skip expired contracts
+      if (!nearest[name] || expiry < nearest[name].expiry) {
+        nearest[name] = { token: cols[tokenIdx], tradingsymbol: cols[symIdx], expiry };
+      }
+    }
+    if (Object.keys(nearest).length) { _mcxMap = nearest; _mcxMapDate = today; console.log('[Kite] MCX map loaded:', Object.keys(nearest).join(', ')); }
+  } catch (e) { console.warn('[Kite] MCX map fetch failed:', e.message); }
+}
+ 
 app.get('/api/kite/login-url', requireAuth, (req, res) => res.json({ url: `https://kite.zerodha.com/connect/login?v=3&api_key=${KITE_API_KEY}` }));
  
 app.get('/api/kite/callback', async (req, res) => {
@@ -601,6 +640,36 @@ app.get('/api/kite/historical', requireAuth, async (req, res) => {
     res.json(await _kiteGet(`/instruments/historical/${token}/${interval || 'day'}?from=${from}&to=${to}&continuous=0&oi=0`));
   } catch (err) { res.status(500).json({ error: safeError(err, 'kite_historical') }); }
 });
+ 
+// ── MCX commodity routes — real futures data, Commodity Derivatives
+// segment. Nearest-expiry contract auto-selected and rolled monthly. ──
+app.get('/api/kite/mcx-quote', requireAuth, async (req, res) => {
+  try {
+    const commodity = (req.query.commodity || '').toUpperCase();
+    if (!MCX_COMMODITIES.includes(commodity)) return res.status(400).json({ error: 'Unknown commodity. Use one of: ' + MCX_COMMODITIES.join(', ') });
+    await _ensureMCXMap();
+    const inst = _mcxMap[commodity];
+    if (!inst) return res.status(404).json({ error: commodity + ' contract not found — check Commodity Derivatives segment is active' });
+    const quote = await _kiteGet(`/quote/ltp?i=MCX:${encodeURIComponent(inst.tradingsymbol)}`);
+    if (quote.error) return res.status(401).json(quote);
+    const q = quote.data?.['MCX:'+inst.tradingsymbol];
+    res.json({ commodity, tradingsymbol: inst.tradingsymbol, expiry: inst.expiry, last_price: q?.last_price || null });
+  } catch (err) { res.status(500).json({ error: safeError(err, 'mcx_quote') }); }
+});
+ 
+app.get('/api/kite/mcx-historical', requireAuth, async (req, res) => {
+  try {
+    const commodity = (req.query.commodity || '').toUpperCase();
+    const { interval, from, to } = req.query;
+    if (!MCX_COMMODITIES.includes(commodity)) return res.status(400).json({ error: 'Unknown commodity. Use one of: ' + MCX_COMMODITIES.join(', ') });
+    await _ensureMCXMap();
+    const inst = _mcxMap[commodity];
+    if (!inst) return res.status(404).json({ error: commodity + ' contract not found — check Commodity Derivatives segment is active' });
+    const data = await _kiteGet(`/instruments/historical/${inst.token}/${interval || 'day'}?from=${from}&to=${to}&continuous=0&oi=0`);
+    res.json({ commodity, tradingsymbol: inst.tradingsymbol, expiry: inst.expiry, ...data });
+  } catch (err) { res.status(500).json({ error: safeError(err, 'mcx_historical') }); }
+});
+ 
  
 app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
   try {
