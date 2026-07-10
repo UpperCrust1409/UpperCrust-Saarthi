@@ -14,7 +14,7 @@ const { runDailyPlanetJob } = require('../crons/dailyPlanetCron');
 const { runSectorScoreJob } = require('../crons/sectorScoreCron');
 const { validate } = require('../validation/validate');
 const { astroBacktestSchema, astroAIQuerySchema, astroRunCronSchema, astroBackfillSchema } = require('../validation/schemas');
-const { getIndiaDasha, getCurrentDashaLords, kpSubLord } = require('../services/dashaService');
+const { getIndiaDasha, getCurrentDashaLords, getAssetDasha, ASSET_CHARTS, kpSubLord } = require('../services/dashaService');
 const { computePanchangRange } = require('../services/panchangService');
  
 // All routes require auth
@@ -30,6 +30,32 @@ router.get('/india-dasha', async (req, res) => {
     const dasha = getIndiaDasha();
     const current = getCurrentDashaLords(dasha);
     res.json({ ...dasha, current });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+ 
+// ── GET /api/astro/asset-dasha ──────────────────────────────────────
+// Same technique as India's national chart, applied to other asset
+// classes via their real launch/first-trade date (verified exact dates
+// only — see dashaService.js for why Crude/NatGas aren't included).
+// Bold call, not a hedge: benefic-lord Mahadasha (Jupiter/Venus/
+// Mercury/Moon) = OVERWEIGHT, malefic-lord (Sun/Mars/Saturn/Rahu/Ketu)
+// = CAUTION. Classical benefic/malefic split, same one used elsewhere
+// in the app (KP Sub-Lords lean classification) — one consistent rule.
+const BENEFIC_LORDS = new Set(['Jupiter','Venus','Mercury','Moon']);
+router.get('/asset-dasha', async (req, res) => {
+  try {
+    const results = Object.keys(ASSET_CHARTS).map(key => {
+      const dasha = getAssetDasha(key);
+      const current = getCurrentDashaLords(dasha);
+      const isBenefic = current?.mahadasha ? BENEFIC_LORDS.has(current.mahadasha.lord) : null;
+      const call = isBenefic === null ? 'NO DATA' : isBenefic ? 'OVERWEIGHT' : 'CAUTION';
+      return {
+        asset: key, label: dasha.label,
+        mahadasha: current?.mahadasha || null, antardasha: current?.antardasha || null,
+        call,
+      };
+    });
+    res.json({ assets: results });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
