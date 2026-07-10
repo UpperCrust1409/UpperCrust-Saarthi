@@ -105,6 +105,24 @@ function computeVimshottariDasha({ year, month, day, hourUTC, label }) {
 // Vyas's chosen muhurta, Taurus Lagna rising).
 const INDIA_CHART = { year: 1947, month: 8, day: 14, hourUTC: 18.5, label: 'India (Independence, 15 Aug 1947 00:00 IST, Delhi)' };
  
+// Other asset "first-trade" charts — same classical mundane-astrology
+// technique (an exchange/index's launch moment treated as its own
+// birth chart). Only assets with a VERIFIED exact date — Dasha math
+// needs day precision, and Crude Oil/Natural Gas launch dates only
+// have year-level confirmation in public sources, so they're not
+// included here rather than guessing a day.
+const ASSET_CHARTS = {
+  NIFTY50: { year: 1996, month: 4, day: 22, hourUTC: 3.75, label: 'Nifty 50 (launched 22 Apr 1996, 09:15 IST, NSE Mumbai)' },
+  GOLD:    { year: 2003, month: 11, day: 10, hourUTC: 4.75, label: 'MCX Gold (exchange launch 10 Nov 2003, 10:15 IST, Mumbai)' },
+  SILVER:  { year: 2003, month: 11, day: 10, hourUTC: 4.75, label: 'MCX Silver (exchange launch 10 Nov 2003, 10:15 IST, Mumbai)' },
+};
+ 
+function getAssetDasha(assetKey) {
+  const chart = ASSET_CHARTS[assetKey];
+  if (!chart) return null;
+  return computeVimshottariDasha(chart);
+}
+ 
 function getIndiaDasha() {
   return computeVimshottariDasha(INDIA_CHART);
 }
@@ -117,7 +135,7 @@ function getCurrentDashaLords(dashaData, atDate = new Date()) {
   return { mahadasha: maha, antardasha: antar };
 }
  
-module.exports = { computeVimshottariDasha, getIndiaDasha, getCurrentDashaLords, INDIA_CHART };
+module.exports = { computeVimshottariDasha, getIndiaDasha, getCurrentDashaLords, getAssetDasha, ASSET_CHARTS, INDIA_CHART };
  
 // ─────────────────────────────────────────────────────────────────
 // KP Sub-Lord — Krishnamurti Paddhati's core innovation. Each 13°20'
