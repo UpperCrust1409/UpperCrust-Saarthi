@@ -80,7 +80,7 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
  
-const globalLimiter = rateLimit({ windowMs: 15*60*1000, max: 500, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests — slow down.' } });
+const globalLimiter = rateLimit({ windowMs: 15*60*1000, max: 2000, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests — slow down.' } });
 const authLimiter   = rateLimit({ windowMs: 15*60*1000, max: 10,  message: { error: 'Too many login attempts. Try again in 15 minutes.' } });
 const claudeLimiter = rateLimit({ windowMs: 60*1000,    max: 20,  message: { error: 'AI rate limit — max 20 requests/minute.' } });
  
