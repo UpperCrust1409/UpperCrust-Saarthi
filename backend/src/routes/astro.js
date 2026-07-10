@@ -63,6 +63,37 @@ router.get('/kp-sublords', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
+// ── GET /api/astro/commodity?ticker=GOLD&range=6mo ─────────────────
+// Yahoo Finance's unofficial v8 chart endpoint — no official API since
+// 2017, but the endpoint that powers their own site still works, free,
+// no key. Same reliability class as any unofficial scrape (can break
+// without notice) — whitelisted tickers only, fails gracefully.
+const COMMODITY_TICKERS = {
+  GOLD: 'GC=F', SILVER: 'SI=F', CRUDE: 'CL=F', COPPER: 'HG=F',
+  NATGAS: 'NG=F', CORN: 'ZC=F', COTTON: 'CT=F', SOYBEAN: 'ZS=F',
+};
+router.get('/commodity', async (req, res) => {
+  try {
+    const key = (req.query.ticker || '').toUpperCase();
+    const ticker = COMMODITY_TICKERS[key];
+    if (!ticker) return res.status(400).json({ error: 'Unknown ticker. Use one of: ' + Object.keys(COMMODITY_TICKERS).join(', ') });
+    const range = ['1mo','3mo','6mo','1y'].includes(req.query.range) ? req.query.range : '6mo';
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=1d`;
+    const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } });
+    if (!resp.ok) return res.status(502).json({ error: 'Yahoo Finance returned ' + resp.status + ' — unofficial endpoint may be temporarily unavailable' });
+    const data = await resp.json();
+    const result = data?.chart?.result?.[0];
+    if (!result) return res.status(502).json({ error: 'Unexpected response shape from Yahoo Finance' });
+    const ts = result.timestamp || [];
+    const q = result.indicators?.quote?.[0] || {};
+    const candles = ts.map((t,i) => ({
+      date: new Date(t*1000).toISOString().slice(0,10),
+      open: q.open?.[i], high: q.high?.[i], low: q.low?.[i], close: q.close?.[i],
+    })).filter(c => c.close != null);
+    res.json({ ticker, name: key, currency: result.meta?.currency, candles });
+  } catch (err) { res.status(500).json({ error: 'Yahoo Finance fetch failed: ' + err.message }); }
+});
+ 
 // ── GET /api/astro/dashboard ──────────────────────────────────────
 router.get('/dashboard', async (req, res) => {
   try {
