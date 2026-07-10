@@ -47,8 +47,14 @@ router.get('/asset-dasha', async (req, res) => {
     const results = Object.keys(ASSET_CHARTS).map(key => {
       const dasha = getAssetDasha(key);
       const current = getCurrentDashaLords(dasha);
-      const isBenefic = current?.mahadasha ? BENEFIC_LORDS.has(current.mahadasha.lord) : null;
-      const call = isBenefic === null ? 'NO DATA' : isBenefic ? 'OVERWEIGHT' : 'CAUTION';
+      const mahaBenefic = current?.mahadasha ? BENEFIC_LORDS.has(current.mahadasha.lord) : null;
+      const antarBenefic = current?.antardasha ? BENEFIC_LORDS.has(current.antardasha.lord) : null;
+      let call = 'NO DATA';
+      if (mahaBenefic != null && antarBenefic != null) {
+        if (mahaBenefic && antarBenefic) call = 'OVERWEIGHT';
+        else if (!mahaBenefic && !antarBenefic) call = 'CAUTION';
+        else call = mahaBenefic ? 'OVERWEIGHT (mixed)' : 'CAUTION (mixed)';
+      }
       return {
         asset: key, label: dasha.label,
         mahadasha: current?.mahadasha || null, antardasha: current?.antardasha || null,
