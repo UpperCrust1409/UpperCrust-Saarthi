@@ -9,7 +9,7 @@
 // the Dasha-period arithmetic layered on top.
 // ─────────────────────────────────────────────────────────────────
 'use strict';
-
+ 
 // Minimal moon+ayanamsha math duplicated here (kept identical to
 // ephemerisService.js) so this module can compute at an exact birth
 // moment, not just noon-of-date like the shared date-only wrapper.
@@ -42,14 +42,14 @@ function siderealMoonLongitude(y, m, d, hourUTC) {
   const jd = julianDay(y, m, d, hourUTC);
   return norm360(moonLongitude(jd) - lahiriAyanamsha(jd));
 }
-
+ 
 // ── Vimshottari constants ──────────────────────────────────────────
 const NAK_SPAN = 360 / 27; // 13°20'
 const LORD_ORDER = ['Ketu','Venus','Sun','Moon','Mars','Rahu','Jupiter','Saturn','Mercury'];
 const LORD_YEARS = { Ketu:7, Venus:20, Sun:6, Moon:10, Mars:7, Rahu:18, Jupiter:16, Saturn:19, Mercury:17 };
 const TOTAL_YEARS = 120;
 const YEAR_MS = 365.25 * 24 * 3600 * 1000;
-
+ 
 /**
  * Generate the full Vimshottari Mahadasha/Antardasha timeline for a
  * given birth moment. Returns Mahadasha list (each with nested
@@ -62,22 +62,22 @@ function computeVimshottariDasha({ year, month, day, hourUTC, label }) {
   const fractionElapsed = elapsedInNak / NAK_SPAN;
   const startLordIdx = nakIdx % 9;
   const startLord = LORD_ORDER[startLordIdx];
-
+ 
   // Balance of the first (birth) Mahadasha remaining
   const firstFullYears = LORD_YEARS[startLord];
   const firstRemainingYears = firstFullYears * (1 - fractionElapsed);
-
+ 
   const birthDate = new Date(Date.UTC(year, month - 1, day, hourUTC));
   const mahadashas = [];
   let cursor = new Date(birthDate.getTime() - (firstFullYears - firstRemainingYears) * YEAR_MS);
-
+ 
   for (let i = 0; i < LORD_ORDER.length + 1; i++) {
     const lordIdx = (startLordIdx + i) % 9;
     const lord = LORD_ORDER[lordIdx];
     const years = LORD_YEARS[lord];
     const start = new Date(cursor.getTime());
     const end = new Date(cursor.getTime() + years * YEAR_MS);
-
+ 
     // Antardashas within this Mahadasha — same 9-lord order, starting
     // from the Mahadasha's own lord, each sized proportionally.
     const antardashas = [];
@@ -91,24 +91,24 @@ function computeVimshottariDasha({ year, month, day, hourUTC, label }) {
       antardashas.push({ lord: subLord, start: subStart.toISOString().slice(0,10), end: subEnd.toISOString().slice(0,10) });
       subCursor = subEnd;
     }
-
+ 
     mahadashas.push({ lord, years, start: start.toISOString().slice(0,10), end: end.toISOString().slice(0,10), antardashas });
     cursor = end;
   }
-
+ 
   return { label, natalMoonLongitude: Math.round(moonLon*10000)/10000, natalNakshatra: nakIdx, mahadashas };
 }
-
+ 
 // India's national chart — 15 August 1947, 00:00 IST, Delhi (IST = UTC+5:30,
 // so 00:00 IST on the 15th = 18:30 UTC on the 14th). Standard mundane
 // astrology reference date used across the literature (Pt. Suryanarayan
 // Vyas's chosen muhurta, Taurus Lagna rising).
 const INDIA_CHART = { year: 1947, month: 8, day: 14, hourUTC: 18.5, label: 'India (Independence, 15 Aug 1947 00:00 IST, Delhi)' };
-
+ 
 function getIndiaDasha() {
   return computeVimshottariDasha(INDIA_CHART);
 }
-
+ 
 function getCurrentDashaLords(dashaData, atDate = new Date()) {
   const ts = atDate.getTime();
   const maha = dashaData.mahadashas.find(m => new Date(m.start).getTime() <= ts && ts < new Date(m.end).getTime());
@@ -116,9 +116,9 @@ function getCurrentDashaLords(dashaData, atDate = new Date()) {
   const antar = maha.antardashas.find(a => new Date(a.start).getTime() <= ts && ts < new Date(a.end).getTime());
   return { mahadasha: maha, antardasha: antar };
 }
-
+ 
 module.exports = { computeVimshottariDasha, getIndiaDasha, getCurrentDashaLords, INDIA_CHART };
-
+ 
 // ─────────────────────────────────────────────────────────────────
 // KP Sub-Lord — Krishnamurti Paddhati's core innovation. Each 13°20'
 // nakshatra is further divided into 9 unequal parts, proportional to
@@ -139,7 +139,7 @@ function kpSubLord(siderealLongitude) {
   const nakIdx = Math.floor(siderealLongitude / nakSpan);
   const nakLordIdx = nakIdx % 9;
   const degInNak = siderealLongitude - nakIdx * nakSpan;
-
+ 
   let cursor = 0;
   for (let i = 0; i < 9; i++) {
     const subLordIdx = (nakLordIdx + i) % 9;
@@ -152,5 +152,5 @@ function kpSubLord(siderealLongitude) {
   }
   return { nakshatraLord: LORD_ORDER[nakLordIdx], subLord: LORD_ORDER[nakLordIdx], degInNak: Math.round(degInNak*1000)/1000 };
 }
-
+ 
 module.exports.kpSubLord = kpSubLord;
