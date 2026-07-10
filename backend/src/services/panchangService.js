@@ -6,7 +6,7 @@
 // no new astronomical model.
 // ─────────────────────────────────────────────────────────────────
 'use strict';
-
+ 
 function norm360(x) { return ((x % 360) + 360) % 360; }
 function julianDay(year, month, day, hour = 12) {
   if (month <= 2) { year--; month += 12; }
@@ -16,7 +16,7 @@ function julianDay(year, month, day, hour = 12) {
 }
 function T(jd) { return (jd - 2451545.0) / 36525; }
 const RAD = Math.PI / 180;
-
+ 
 function sunLongitude(jd) {
   const t = T(jd);
   const L0 = norm360(280.46646 + 36000.76983 * t);
@@ -39,12 +39,12 @@ function moonLongitude(jd) {
 // Lahiri ayanamsha not needed here — Tithi/Karana are defined by the
 // Sun-Moon ANGULAR DIFFERENCE, which is identical in tropical or
 // sidereal frames (the ayanamsha cancels out in a difference).
-
+ 
 const TITHI_NAMES = ['Pratipada','Dwitiya','Tritiya','Chaturthi','Panchami','Shashthi','Saptami','Ashtami','Navami','Dashami','Ekadashi','Dwadashi','Trayodashi','Chaturdashi','Purnima/Amavasya'];
 const KARANA_MOVABLE = ['Bava','Balava','Kaulava','Taitila','Gara','Vanija','Vishti'];
 const KARANA_FIXED_START = ['Kimstughna'];
 const KARANA_FIXED_END = ['Shakuni','Chatushpada','Naga'];
-
+ 
 function karanaName(karanaIdx) {
   // 60 karanas per lunar month (0-59). #0 = Kimstughna (fixed).
   // #57,58,59 = Shakuni, Chatushpada, Naga (fixed).
@@ -53,23 +53,23 @@ function karanaName(karanaIdx) {
   if (karanaIdx >= 57) return KARANA_FIXED_END[karanaIdx - 57];
   return KARANA_MOVABLE[(karanaIdx - 1) % 7];
 }
-
+ 
 function computePanchang(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const jd = julianDay(y, m, d, 12);
   const sunLon = sunLongitude(jd);
   const moonLon = moonLongitude(jd);
   const diff = norm360(moonLon - sunLon);
-
+ 
   const tithiNum = Math.floor(diff / 12) + 1; // 1-30
   const paksha = tithiNum <= 15 ? 'Shukla (waxing)' : 'Krishna (waning)';
   const tithiInPaksha = tithiNum <= 15 ? tithiNum : tithiNum - 15;
   const tithiName = TITHI_NAMES[Math.min(tithiInPaksha - 1, 14)];
-
+ 
   const karanaIdx = Math.floor(diff / 6); // 0-59
   const karana = karanaName(karanaIdx);
   const isBhadra = karana === 'Vishti';
-
+ 
   // Panchak: Moon in the last quarter of Dhanishtha through Revati
   // (sidereal nakshatra indices 22-26, with 22 only valid in its 2nd
   // half — using tropical Moon here since Panchak is nakshatra-based
@@ -80,13 +80,13 @@ function computePanchang(dateStr) {
   const nakIdx = Math.floor(siderealMoon / (360/27));
   const nakDeg = siderealMoon - nakIdx * (360/27);
   const isPanchak = (nakIdx === 22 && nakDeg >= (360/27)/2) || (nakIdx >= 23 && nakIdx <= 26);
-
+ 
   return {
     date: dateStr, tithiNum, tithiName, paksha, karana, isBhadra, isPanchak,
     caution: isBhadra || isPanchak,
   };
 }
-
+ 
 function computePanchangRange(startDateStr, days) {
   const out = [];
   const [y,m,d] = startDateStr.split('-').map(Number);
@@ -97,5 +97,5 @@ function computePanchangRange(startDateStr, days) {
   }
   return out;
 }
-
+ 
 module.exports = { computePanchang, computePanchangRange };
