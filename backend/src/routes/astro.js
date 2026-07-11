@@ -154,18 +154,34 @@ router.get('/confluence', async (req, res) => {
     const agreeing = signals.filter(x => x.direction !== 0);
     const bullish = agreeing.filter(x => x.direction > 0).length;
     const bearish = agreeing.filter(x => x.direction < 0).length;
+    const hasBacktestEvidence = signals.some(s => s.evidence === 'backtest' && s.significant);
  
-    let verdict;
-    if (normalizedScore >= 50) verdict = 'STRONG OVERWEIGHT';
-    else if (normalizedScore >= 20) verdict = 'OVERWEIGHT';
-    else if (normalizedScore <= -50) verdict = 'STRONG CAUTION';
-    else if (normalizedScore <= -20) verdict = 'CAUTION';
-    else verdict = 'NEUTRAL';
+    // Confidence gate: a verdict built from only 1 directional signal
+    // (very common — Nifty/Gold/Silver all share the same KP Moon
+    // signal, which is instrument-agnostic) should never present as
+    // "STRONG" anything. Requires either 2+ agreeing directional
+    // signals, or real significant backtest evidence, before allowing
+    // the stronger verdict tiers.
+    const directionalCount = agreeing.length;
+    const hasEnoughEvidence = directionalCount >= 2 || hasBacktestEvidence;
+ 
+    let verdict, confidence;
+    if (!hasEnoughEvidence) {
+      confidence = 'LOW';
+      verdict = normalizedScore > 0 ? 'WEAK LEAN — OVERWEIGHT' : normalizedScore < 0 ? 'WEAK LEAN — CAUTION' : 'NEUTRAL';
+    } else {
+      confidence = hasBacktestEvidence ? 'HIGH' : 'MODERATE';
+      if (normalizedScore >= 50) verdict = 'STRONG OVERWEIGHT';
+      else if (normalizedScore >= 20) verdict = 'OVERWEIGHT';
+      else if (normalizedScore <= -50) verdict = 'STRONG CAUTION';
+      else if (normalizedScore <= -20) verdict = 'CAUTION';
+      else verdict = 'NEUTRAL';
+    }
  
     res.json({
-      instrument, verdict, score: normalizedScore,
+      instrument, verdict, score: normalizedScore, confidence, directionalCount,
       signals, bullishCount: bullish, bearishCount: bearish, totalSignals: signals.length,
-      hasBacktestEvidence: signals.some(s => s.evidence === 'backtest'),
+      hasBacktestEvidence,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
