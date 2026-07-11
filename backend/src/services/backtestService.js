@@ -160,6 +160,38 @@ async function runBacktest({ event_type, instrument, window_days = 30, date_from
     return vals.length ? { window: w, avg_return_pct: round4(mean(vals)), win_rate_pct: round4(vals.filter(v=>v>0).length/vals.length*100), n: vals.length } : { window: w, avg_return_pct: null, win_rate_pct: null, n: 0 };
   });
  
+  // ── Regime-conditioning: was the broader market (Nifty) in a bull,
+  // bear, or sideways stretch when each event occurred? An effect that
+  // only appears in one regime (e.g. only during the 2020-21 bull run)
+  // isn't a real astro edge — it's riding the market's own trend. Nifty
+  // itself is the regime classifier regardless of what instrument is
+  // being tested, since it's the broadest available proxy for "market
+  // mood" at that time. ──
+  let regimeSplit = null;
+  try {
+    const niftyOhlc = instrument === 'NIFTY50' ? ohlc : await getOHLC('NIFTY50', addDays(allFrom, -200), allTo);
+    if (niftyOhlc && niftyOhlc.length > 200) {
+      const niftyMap = {};
+      niftyOhlc.forEach(r => { niftyMap[r.date] = parseFloat(r.close); });
+      const regimeFor = (dateStr) => {
+        const now = findClosestPrice(niftyMap, dateStr);
+        const then = findClosestPrice(niftyMap, addDays(dateStr, -126)); // ~6 trading months back
+        if (!now || !then) return null;
+        const trailing = (now - then) / then * 100;
+        return trailing > 10 ? 'bull' : trailing < -10 ? 'bear' : 'sideways';
+      };
+      const byRegime = { bull: [], bear: [], sideways: [] };
+      observations.forEach(o => { const r = regimeFor(o.date); if (r) byRegime[r].push(o.return_pct); });
+      regimeSplit = {};
+      for (const [regime, vals] of Object.entries(byRegime)) {
+        regimeSplit[regime] = vals.length >= 3 ? { avg: round4(mean(vals)), n: vals.length } : { avg: null, n: vals.length };
+      }
+      const regimesWithData = Object.values(regimeSplit).filter(r => r.avg != null);
+      regimeSplit.consistentAcrossRegimes = regimesWithData.length >= 2 &&
+        regimesWithData.every(r => Math.sign(r.avg) === Math.sign(regimesWithData[0].avg));
+    }
+  } catch (e) { console.warn('[Backtest] Regime classification failed:', e.message); }
+ 
   const result = {
     event_type, instrument, window_days,
     date_from: date_from || allFrom, date_to: date_to || lastEvent,
@@ -169,7 +201,7 @@ async function runBacktest({ event_type, instrument, window_days = 30, date_from
     sharpe_ratio: round4(stats.sharpe),
     baseline_avg_return_pct: round4(stats.baselineAvg), baseline_win_rate_pct: round4(stats.baselineWinRate),
     t_stat: round4(stats.tStat), p_value: round4(stats.pValue), significant: stats.pValue != null && stats.pValue < 0.05,
-    consistency, staleness, decay_curve: decayCurve,
+    consistency, staleness, decay_curve: decayCurve, regime_split: regimeSplit,
     results_json: observations,
   };
  
@@ -324,7 +356,7 @@ function formatResult(r) {
     win_rate_pct: r.win_rate_pct, max_drawdown_pct: r.max_drawdown_pct, sharpe_ratio: r.sharpe_ratio,
     baseline_avg_return_pct: r.baseline_avg_return_pct, baseline_win_rate_pct: r.baseline_win_rate_pct,
     t_stat: r.t_stat, p_value: r.p_value, significant: r.significant,
-    consistency: r.consistency, staleness: r.staleness, decay_curve: r.decay_curve,
+    consistency: r.consistency, staleness: r.staleness, decay_curve: r.decay_curve, regime_split: r.regime_split,
     observations: r.results_json || [],
   };
 }
