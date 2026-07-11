@@ -77,6 +77,99 @@ router.get('/panchang', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
  
+// ── GET /api/astro/confluence?instrument=NIFTY50 ────────────────────
+// Combines every signal source in the app into ONE weighted verdict —
+// instead of making the user manually cross-reference India Cycles,
+// KP Sub-Lords, Teji-Mandi, and Backtest Lab. Weighting is explicit and
+// visible, not hidden: real backtest evidence (tested against actual
+// price history) counts 3x; classical-only techniques (Dasha, KP lean,
+// Panchang) count 1x each, since they have no statistical backing of
+// their own. Shows "X of Y signals agree" so the user can see exactly
+// how much confluence is behind the verdict, not just a black-box score.
+const CONFLUENCE_ASSET_MAP = { NIFTY50: 'NIFTY50', GOLD: 'GOLD', SILVER: 'SILVER' };
+router.get('/confluence', async (req, res) => {
+  try {
+    const instrument = (req.query.instrument || 'NIFTY50').toUpperCase();
+    const signals = [];
+ 
+    // 1. Dasha lean (only for assets with a verified chart)
+    const assetKey = CONFLUENCE_ASSET_MAP[instrument];
+    if (assetKey) {
+      const dasha = getAssetDasha(assetKey);
+      const current = getCurrentDashaLords(dasha);
+      if (current?.mahadasha && current?.antardasha) {
+        const mahaBenefic = BENEFIC_LORDS.has(current.mahadasha.lord);
+        const antarBenefic = BENEFIC_LORDS.has(current.antardasha.lord);
+        const score = (mahaBenefic?1:-1) + (antarBenefic?1:-1); // -2..+2
+        signals.push({ source: 'Dasha (India Cycles)', weight: 1, direction: score>0?1:score<0?-1:0,
+          detail: `${current.mahadasha.lord} Mahadasha / ${current.antardasha.lord} Antardasha`, evidence: 'classical' });
+      }
+    }
+ 
+    // 2. KP Moon sub-lord lean
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data: planets } = await supabase.from('astro_planet_positions').select('*').eq('date', today).eq('planet', 'Moon').single();
+      if (planets) {
+        const kp = kpSubLord(planets.longitude);
+        const benefic = BENEFIC_LORDS.has(kp.subLord);
+        signals.push({ source: 'KP Moon Sub-Lord', weight: 1, direction: benefic?1:-1,
+          detail: `Sub-lord: ${kp.subLord}`, evidence: 'classical' });
+      }
+    } catch (e) {}
+ 
+    // 3. Panchang caution (reduces confidence, not directional)
+    try {
+      const today = new Date().toISOString().slice(0,10);
+      const panchang = computePanchangRange(today, 1)[0];
+      if (panchang?.caution) {
+        signals.push({ source: 'Panchang', weight: 1, direction: 0, caution: true,
+          detail: panchang.isBhadra ? 'Bhadra active today' : 'Panchak active today', evidence: 'classical' });
+      }
+    } catch (e) {}
+ 
+    // 4. Real backtest — currently active retrograde, if any, tested
+    // against THIS specific instrument (weighted 3x — the only signal
+    // here that's actually been checked against real price history).
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data: activePlanets } = await supabase.from('astro_planet_positions').select('planet, retrograde').eq('date', today).eq('retrograde', true);
+      for (const p of (activePlanets || [])) {
+        if (!['Mercury','Venus','Mars','Jupiter','Saturn'].includes(p.planet)) continue;
+        const bt = await runBacktest({ event_type: p.planet.toUpperCase()+'_RETROGRADE', instrument, window_days: 30 });
+        if (bt.n_observations > 2) {
+          const excess = bt.avg_return_pct - (bt.baseline_avg_return_pct ?? 0);
+          signals.push({ source: `${p.planet} Retrograde (real backtest)`, weight: 3,
+            direction: bt.significant ? (excess>0?1:-1) : 0,
+            detail: `n=${bt.n_observations}, p=${bt.p_value?.toFixed(3)}, ${bt.significant?'significant':'not significant'}`,
+            evidence: 'backtest', significant: bt.significant });
+        }
+      }
+    } catch (e) { console.warn('[Confluence] Backtest fetch failed:', e.message); }
+ 
+    // ── Combine ──
+    const weightedSum = signals.reduce((s,x) => s + x.weight * x.direction, 0);
+    const maxPossible = signals.reduce((s,x) => s + x.weight, 0) || 1;
+    const normalizedScore = Math.round((weightedSum / maxPossible) * 100); // -100..+100
+    const agreeing = signals.filter(x => x.direction !== 0);
+    const bullish = agreeing.filter(x => x.direction > 0).length;
+    const bearish = agreeing.filter(x => x.direction < 0).length;
+ 
+    let verdict;
+    if (normalizedScore >= 50) verdict = 'STRONG OVERWEIGHT';
+    else if (normalizedScore >= 20) verdict = 'OVERWEIGHT';
+    else if (normalizedScore <= -50) verdict = 'STRONG CAUTION';
+    else if (normalizedScore <= -20) verdict = 'CAUTION';
+    else verdict = 'NEUTRAL';
+ 
+    res.json({
+      instrument, verdict, score: normalizedScore,
+      signals, bullishCount: bullish, bearishCount: bearish, totalSignals: signals.length,
+      hasBacktestEvidence: signals.some(s => s.evidence === 'backtest'),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+ 
 // ── GET /api/astro/kp-sublords ──────────────────────────────────────
 // KP sub-lord for every planet today — reuses today's already-computed
 // sidereal positions (astro_planet_positions), just adds the sub-lord
