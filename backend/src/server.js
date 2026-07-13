@@ -657,18 +657,127 @@ app.get('/api/kite/mcx-quote', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: safeError(err, 'mcx_quote') }); }
 });
  
-app.get('/api/kite/mcx-historical', requireAuth, async (req, res) => {
+// ── PCR (Put-Call Ratio) — Kite F&O options chain, real OI + volume.
+// Uses the nearest-expiry option chain for ANY F&O-enabled symbol
+// (indices, sector indices, individual stocks) — sums Call vs Put OI
+// (longer-term positioning) and volume (short-term mood) separately.
+let _nfoMap = {}; // { SYMBOL: { expiry, contracts: [...] } }
+let _nfoMapDate = null;
+async function _ensureNFOMap() {
+  const today = new Date().toISOString().split('T')[0];
+  if (_nfoMapDate === today && Object.keys(_nfoMap).length) return;
+  if (!_kiteToken) return;
   try {
-    const commodity = (req.query.commodity || '').toUpperCase();
-    const { interval, from, to } = req.query;
-    if (!MCX_COMMODITIES.includes(commodity)) return res.status(400).json({ error: 'Unknown commodity. Use one of: ' + MCX_COMMODITIES.join(', ') });
-    await _ensureMCXMap();
-    const inst = _mcxMap[commodity];
-    if (!inst) return res.status(404).json({ error: commodity + ' contract not found — check Commodity Derivatives segment is active' });
-    const data = await _kiteGet(`/instruments/historical/${inst.token}/${interval || 'day'}?from=${from}&to=${to}&continuous=0&oi=0`);
-    res.json({ commodity, tradingsymbol: inst.tradingsymbol, expiry: inst.expiry, ...data });
-  } catch (err) { res.status(500).json({ error: safeError(err, 'mcx_historical') }); }
+    const resp = await fetch(`${KITE_BASE}/instruments/NFO`, { headers: { 'Authorization': `token ${KITE_API_KEY}:${_kiteToken}`, 'X-Kite-Version': '3' } });
+    const csv = await resp.text();
+    const lines = csv.split('\n');
+    const header = lines[0].split(',');
+    const tokenIdx = header.indexOf('instrument_token');
+    const symIdx = header.indexOf('tradingsymbol');
+    const nameIdx = header.indexOf('name');
+    const expiryIdx = header.indexOf('expiry');
+    const strikeIdx = header.indexOf('strike');
+    const typeIdx = header.indexOf('instrument_type'); // CE / PE
+ 
+    const byIndex = {};
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',');
+      if (cols.length <= Math.max(tokenIdx, symIdx, nameIdx, expiryIdx, strikeIdx, typeIdx)) continue;
+      const name = cols[nameIdx];
+      if (!name) continue;
+      const type = cols[typeIdx];
+      if (type !== 'CE' && type !== 'PE') continue;
+      const expiry = cols[expiryIdx];
+      if (!expiry || expiry < today) continue;
+      if (!byIndex[name]) byIndex[name] = {};
+      if (!byIndex[name][expiry]) byIndex[name][expiry] = [];
+      byIndex[name][expiry].push({ strike: parseFloat(cols[strikeIdx]), type, token: cols[tokenIdx], tradingsymbol: cols[symIdx] });
+    }
+    const nearest = {};
+    for (const [name, expiries] of Object.entries(byIndex)) {
+      const nearestExpiry = Object.keys(expiries).sort()[0];
+      nearest[name] = { expiry: nearestExpiry, contracts: expiries[nearestExpiry] };
+    }
+    if (Object.keys(nearest).length) { _nfoMap = nearest; _nfoMapDate = today; console.log('[Kite] NFO map loaded:', Object.keys(nearest).length, 'F&O symbols'); }
+  } catch (e) { console.warn('[Kite] NFO map fetch failed:', e.message); }
+}
+ 
+app.get('/api/kite/pcr-symbols', requireAuth, async (req, res) => {
+  await _ensureNFOMap();
+  res.json({ symbols: Object.keys(_nfoMap).sort() });
 });
+ 
+// ── GET /api/kite/pcr-multi?symbols=NIFTY,BANKNIFTY,FINNIFTY,MIDCPNIFTY
+// All listed index derivatives at once — the ones that actually exist
+// as real contracts, not a fictional "sector index" option. ──
+async function _computeSinglePCR(index) {
+  await _ensureNFOMap();
+  const chain = _nfoMap[index];
+  if (!chain) return { index, error: 'not found or F&O segment not active' };
+  let totalCallOI = 0, totalPutOI = 0, totalCallVol = 0, totalPutVol = 0;
+  for (let i = 0; i < chain.contracts.length; i += 400) {
+    const batch = chain.contracts.slice(i, i + 400);
+    const ids = batch.map(c => 'NFO:' + c.tradingsymbol).map(encodeURIComponent).join('&i=');
+    const q = await _kiteGet(`/quote?i=${ids}`);
+    if (q.error) continue;
+    batch.forEach(c => {
+      const d = q.data?.['NFO:' + c.tradingsymbol];
+      if (!d) return;
+      if (c.type === 'CE') { totalCallOI += d.oi || 0; totalCallVol += d.volume || 0; }
+      else { totalPutOI += d.oi || 0; totalPutVol += d.volume || 0; }
+    });
+  }
+  const pcrOI = totalCallOI > 0 ? totalPutOI / totalCallOI : null;
+  const pcrVolume = totalCallVol > 0 ? totalPutVol / totalCallVol : null;
+  return {
+    index, expiry: chain.expiry, contractCount: chain.contracts.length,
+    pcr_oi: pcrOI != null ? Math.round(pcrOI * 1000) / 1000 : null,
+    pcr_volume: pcrVolume != null ? Math.round(pcrVolume * 1000) / 1000 : null,
+    totalCallOI, totalPutOI, totalCallVol, totalPutVol,
+  };
+}
+ 
+app.get('/api/kite/pcr-multi', requireAuth, async (req, res) => {
+  try {
+    const symbols = (req.query.symbols || 'NIFTY,BANKNIFTY,FINNIFTY,MIDCPNIFTY').split(',').map(s=>s.trim().toUpperCase());
+    const results = await Promise.all(symbols.map(s => _pcrWithHistory(s)));
+    res.json({ results });
+  } catch (err) { res.status(500).json({ error: safeError(err, 'pcr_multi') }); }
+});
+ 
+async function _pcrWithHistory(index) {
+  const r = await _computeSinglePCR(index);
+  if (r.error) return r;
+  const today = new Date().toISOString().slice(0,10);
+  let percentileOI = null, percentileVolume = null, historyDays = 0;
+  try {
+    await _supabase.from('pcr_history').upsert([{ symbol: index, snapshot_date: today, pcr_oi: r.pcr_oi, pcr_volume: r.pcr_volume }], { onConflict: 'symbol,snapshot_date' });
+    const { data: hist } = await _supabase.from('pcr_history')
+      .select('pcr_oi, pcr_volume').eq('symbol', index)
+      .gte('snapshot_date', new Date(Date.now() - 90*86400000).toISOString().slice(0,10));
+    if (hist && hist.length >= 10) {
+      historyDays = hist.length;
+      const percentileRank = (val, arr) => val == null ? null : Math.round(arr.filter(v => v != null && v <= val).length / arr.filter(v=>v!=null).length * 100);
+      percentileOI = percentileRank(r.pcr_oi, hist.map(h=>h.pcr_oi));
+      percentileVolume = percentileRank(r.pcr_volume, hist.map(h=>h.pcr_volume));
+    }
+  } catch (e) { console.warn('[PCR] History storage/lookup failed:', e.message); }
+  return {
+    ...r, percentile_oi: percentileOI, percentile_volume: percentileVolume, history_days: historyDays,
+    extreme_oi: percentileOI != null ? (percentileOI >= 90 ? 'extreme_high' : percentileOI <= 10 ? 'extreme_low' : null) : null,
+    extreme_volume: percentileVolume != null ? (percentileVolume >= 90 ? 'extreme_high' : percentileVolume <= 10 ? 'extreme_low' : null) : null,
+  };
+}
+ 
+app.get('/api/kite/pcr', requireAuth, async (req, res) => {
+  try {
+    const index = (req.query.index || 'NIFTY').toUpperCase();
+    const r = await _pcrWithHistory(index);
+    if (r.error) return res.status(404).json({ error: index + ' option chain not found — either not F&O-enabled, or check Equity Derivatives (F&O) segment is active on your Kite account' });
+    res.json(r);
+  } catch (err) { res.status(500).json({ error: safeError(err, 'pcr') }); }
+});
+ 
  
  
 app.post('/api/kite/portfolio-live', requireAuth, async (req, res) => {
